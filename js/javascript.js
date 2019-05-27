@@ -138,8 +138,7 @@ function getQuotes(id) {
 
 				success : function(data) {
 					tableBody.prepend("<h2>" + data.QUOTE + "</h2> "
-							+ "<p class=\"satisfy\">" + "<a href=\"" + data.ID
-							+ "\">—  " + data.AUTHOR + "</a>" + "</p>");
+							+ "<p class=\"satisfy\">" + "<a>—  " + data.AUTHOR + "</a>" + "</p>");
 				}
 			});
 }
