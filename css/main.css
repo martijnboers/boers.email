@@ -11,8 +11,7 @@ a {
     text-decoration: none
 }
 
-canvas,
-#composition {
+canvas {
     position: fixed;
     left: 0;
     top: 0;
@@ -20,8 +19,8 @@ canvas,
     z-index: -1;
 }
 
+#container,
 canvas,
-#composition,
 body {
     width: 100vw;
     height: 100vh;

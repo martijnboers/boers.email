@@ -1,8 +1,8 @@
 var NUM_PARTICLES = ( ( ROWS = 75 ) * ( COLS = 250 ) ),
-    THICKNESS = Math.pow( 80, 2 ),
+    THICKNESS = Math.pow( 100, 1.75 ),
     SPACING = 3,
     MARGIN = 100,
-    COLOR = 220,
+    COLOR = 180,
     DRAG = 0.95,
     EASE = 0.25,
 
@@ -45,9 +45,9 @@ function init() {
 
     w = canvas.width = COLS * SPACING + MARGIN * 2;
     h = canvas.height = ROWS * SPACING + MARGIN * 2;
-
-    container.style.marginLeft = Math.round( w * -0.5 ) + 'px';
-    container.style.marginTop = Math.round( h * -0.5 ) + 'px';
+    //
+    // container.style.marginLeft = Math.round( w * -0.5 ) + 'px';
+    // container.style.marginTop = Math.round( h * -0.5 ) + 'px';
 
     for ( i = 0; i < NUM_PARTICLES; i++ ) {
 
@@ -59,7 +59,6 @@ function init() {
     }
 
     // container.addEventListener( 'mousemove', function(e) {
-    //
     //     bounds = container.getBoundingClientRect();
     //     mx = e.clientX - bounds.left;
     //     my = e.clientY - bounds.top;
@@ -77,8 +76,8 @@ function step() {
         if ( !man ) {
 
             t = +new Date() * 0.001;
-            mx = w * 0.5 + ( Math.cos( t * 2.1 ) * Math.cos( t * 0.9 ) * w * 0.45 );
-            my = h * 0.5 + ( Math.sin( t * 3.2 ) * Math.tan( Math.sin( t * 0.8 ) ) * h * 0.45 );
+            mx = w * 0.5 + ( Math.cos( t * 1.4 ) * Math.cos( t * 0.9 ) * w * 0.45 );
+            my = h * 0.5 + ( Math.sin( t * 2.5 ) * Math.tan( Math.sin( t * 0.8 ) ) * h * 0.45 );
         }
 
         for ( i = 0; i < NUM_PARTICLES; i++ ) {
@@ -111,8 +110,6 @@ function step() {
 
         ctx.putImageData( a, 0, 0 );
     }
-
-    if ( stats ) stats.end();
 
     requestAnimationFrame( step );
 }
