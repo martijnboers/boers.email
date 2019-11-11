@@ -1,20 +1,10 @@
-var NUM_PARTICLES = ( ( ROWS = 100 ) * ( COLS = 300 ) ),
+var NUM_PARTICLES = ( ( ROWS = 75 ) * ( COLS = 250 ) ),
     THICKNESS = Math.pow( 80, 2 ),
     SPACING = 3,
     MARGIN = 100,
     COLOR = 220,
     DRAG = 0.95,
     EASE = 0.25,
-
-    /*
-
-    used for sine approximation, but Math.sin in Chrome is still fast enough :)http://jsperf.com/math-sin-vs-sine-approximation
-
-    B = 4 / Math.PI,
-    C = -4 / Math.pow( Math.PI, 2 ),
-    P = 0.225,
-
-    */
 
     container,
     particle,
@@ -77,16 +67,10 @@ function init() {
     //
     // });
 
-    if ( typeof Stats === 'function' ) {
-        document.body.appendChild( ( stats = new Stats() ).domElement );
-    }
-
     container.appendChild( canvas );
 }
 
 function step() {
-
-    if ( stats ) stats.begin();
 
     if ( tog = !tog ) {
 
