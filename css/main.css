@@ -1,0 +1,100 @@
+html {
+    background-color: #000
+}
+
+body {
+    margin: 0
+}
+
+a {
+    color: #fff;
+    text-decoration: none
+}
+
+canvas,
+#composition {
+    position: fixed;
+    left: 0;
+    top: 0;
+    will-change: transform;
+    z-index: -1;
+}
+
+canvas,
+#composition,
+body {
+    width: 100vw;
+    height: 100vh;
+    font-family: "Computer Modern Serif", serif;
+}
+
+header {
+    max-width: 380px;
+    position: absolute;
+    margin: 10px;
+    left: 0;
+    top: 0;
+    color: #fff;
+}
+
+header b {
+    font-weight: bold;
+}
+
+.blocked {
+    z-index: 1;
+    background: #000;
+}
+
+h1,
+h2 {
+    margin: 0;
+    padding-bottom: 5px;
+    font-weight: 300;
+    font-size: 16px;
+    text-transform: uppercase;
+    line-height: 16px;
+    text-align: justify;
+}
+
+dl,
+p {
+    font-weight: 100;
+    font-family: "Computer Modern Typewriter Light", serif;
+}
+
+.tree {
+    width: 380px;
+    height: 400px;
+    vertical-align: middle;
+    object-fit: cover;
+}
+
+ul {
+    font-size: 13px;
+    list-style: none;
+    padding-right: 4px;
+    padding-left: 4px;
+    margin-top: 18px;
+    border: 1px solid hsla(0, 0%, 100%, .3);
+}
+
+li {
+    padding: 2px 0 4px;
+    display: flex;
+    justify-content: space-between;
+}
+
+li strong {
+    text-transform: uppercase;
+    font-weight: 400;
+    font-size: 13px
+}
+
+li span {
+    text-align: right
+}
+
+li + li {
+    border-top: 1px solid hsla(0, 0%, 100%, .3)
+}
