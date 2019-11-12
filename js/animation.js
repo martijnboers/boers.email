@@ -1,5 +1,5 @@
 var NUM_PARTICLES = ( ( ROWS = 105 ) * ( COLS = 250 ) ),
-    THICKNESS = Math.pow( 100, 1.75 ),
+    THICKNESS = Math.pow( 115, 1.75 ),
     SPACING = 5,
     MARGIN = 30,
     COLOR = 180,
@@ -7,6 +7,7 @@ var NUM_PARTICLES = ( ( ROWS = 105 ) * ( COLS = 250 ) ),
     EASE = 0.25,
 
     container,
+    continueLoop,
     particle,
     canvas,
     list,
@@ -57,11 +58,16 @@ function init() {
     }
 
     container.addEventListener( 'mousemove', function(e) {
-        console.log('hiero');
+        clearInterval(continueLoop)
+
         bounds = container.getBoundingClientRect();
         mx = e.clientX - bounds.left;
         my = e.clientY - bounds.top;
         man = true;
+
+        continueLoop = setInterval(function() {
+            man = false;
+        }, 2000);
 
     });
 
