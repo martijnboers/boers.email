@@ -11,12 +11,15 @@ a {
     text-decoration: none
 }
 
+#container,
 canvas {
+    position:absolute;
+    top:50%; left:50%;
+    transform: translate(-50%,-50%);
     will-change: transform;
     z-index: -1;
 }
 
-#container,
 body {
     width: 100vw;
     height: 100vh;

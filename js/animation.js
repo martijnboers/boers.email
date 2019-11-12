@@ -1,7 +1,7 @@
 var NUM_PARTICLES = ( ( ROWS = 110 ) * ( COLS = 250 ) ),
     THICKNESS = Math.pow( 100, 1.75 ),
     SPACING = 4,
-    MARGIN = 100,
+    MARGIN = 0,
     COLOR = 180,
     DRAG = 0.95,
     EASE = 0.25,
@@ -41,15 +41,13 @@ function init() {
 
     list = [];
 
-    bounds = container.getBoundingClientRect();
-
-    console.log(bounds.height, bounds.width)
-
     w = canvas.width = COLS * SPACING + MARGIN * 2;
     h = canvas.height = ROWS * SPACING + MARGIN * 2;
 
-    // container.style.marginLeft = Math.round( w * -0.5 ) + 'px';
-    // container.style.marginTop = Math.round( h * -0.5 ) + 'px';
+    console.log(w, h)
+
+    container.style.width = w + "px";
+    container.style.height = h + "px";
 
     for ( i = 0; i < NUM_PARTICLES; i++ ) {
 
@@ -61,6 +59,7 @@ function init() {
     }
 
     container.addEventListener( 'mousemove', function(e) {
+        console.log(1);
         bounds = container.getBoundingClientRect();
         mx = e.clientX - bounds.left;
         my = e.clientY - bounds.top;
