@@ -36,6 +36,7 @@ header {
     left: 0;
     top: 0;
     color: #fff;
+    pointer-events: none;
 }
 
 header b {
@@ -69,7 +70,6 @@ p {
     height: 400px;
     vertical-align: middle;
     object-fit: cover;
-    pointer-events: none;
 }
 
 ul {
@@ -79,6 +79,7 @@ ul {
     padding-left: 4px;
     margin-top: 18px;
     border: 1px solid hsla(0, 0%, 100%, .3);
+    pointer-events: auto;
 }
 
 li {
