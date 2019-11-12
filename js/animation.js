@@ -1,6 +1,6 @@
-var NUM_PARTICLES = ( ( ROWS = 75 ) * ( COLS = 250 ) ),
+var NUM_PARTICLES = ( ( ROWS = 110 ) * ( COLS = 250 ) ),
     THICKNESS = Math.pow( 100, 1.75 ),
-    SPACING = 3,
+    SPACING = 4,
     MARGIN = 100,
     COLOR = 180,
     DRAG = 0.95,
@@ -9,8 +9,6 @@ var NUM_PARTICLES = ( ( ROWS = 75 ) * ( COLS = 250 ) ),
     container,
     particle,
     canvas,
-    mouse,
-    stats,
     list,
     ctx,
     tog,
@@ -43,9 +41,13 @@ function init() {
 
     list = [];
 
+    bounds = container.getBoundingClientRect();
+
+    console.log(bounds.height, bounds.width)
+
     w = canvas.width = COLS * SPACING + MARGIN * 2;
     h = canvas.height = ROWS * SPACING + MARGIN * 2;
-    //
+
     // container.style.marginLeft = Math.round( w * -0.5 ) + 'px';
     // container.style.marginTop = Math.round( h * -0.5 ) + 'px';
 
@@ -58,13 +60,13 @@ function init() {
         list[i] = p;
     }
 
-    // container.addEventListener( 'mousemove', function(e) {
-    //     bounds = container.getBoundingClientRect();
-    //     mx = e.clientX - bounds.left;
-    //     my = e.clientY - bounds.top;
-    //     man = true;
-    //
-    // });
+    container.addEventListener( 'mousemove', function(e) {
+        bounds = container.getBoundingClientRect();
+        mx = e.clientX - bounds.left;
+        my = e.clientY - bounds.top;
+        man = true;
+
+    });
 
     container.appendChild( canvas );
 }
