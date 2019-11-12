@@ -44,8 +44,6 @@ function init() {
     w = canvas.width = COLS * SPACING + MARGIN * 2;
     h = canvas.height = ROWS * SPACING + MARGIN * 2;
 
-    console.log(w, h)
-
     container.style.width = w + "px";
     container.style.height = h + "px";
 
@@ -59,7 +57,7 @@ function init() {
     }
 
     container.addEventListener( 'mousemove', function(e) {
-        console.log(1);
+        console.log('hiero');
         bounds = container.getBoundingClientRect();
         mx = e.clientX - bounds.left;
         my = e.clientY - bounds.top;
