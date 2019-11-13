@@ -44,6 +44,7 @@ function init () {
     if (window.innerWidth <= 800 && window.innerHeight <= 800) {
         NUM_PARTICLES = ((ROWS = 100) * (COLS = 100))
         MARGIN = 5
+        THICKNESS = Math.pow(60, 2)
     }
 
     w = canvas.width = COLS * SPACING + MARGIN * 2
@@ -61,19 +62,32 @@ function init () {
         list[i] = p
     }
 
-    container.addEventListener('mousemove', function (e) {
+    const movementFunction = function (e) {
         clearInterval(continueLoop)
 
+        let clientX
+        let clientY
+
+        if (typeof e.touches != "undefined") {
+            clientX = e.touches[0].clientX
+            clientY = e.touches[0].clientY
+        } else {
+            clientX = e.clientX
+            clientY = e.clientY
+        }
+
         bounds = container.getBoundingClientRect()
-        mx = e.clientX - bounds.left
-        my = e.clientY - bounds.top
+        mx = clientX - bounds.left
+        my = clientY - bounds.top
         man = true
 
         continueLoop = setInterval(function () {
             man = false
         }, 2000)
+    }
 
-    })
+    container.addEventListener('mousemove', movementFunction, false)
+    container.addEventListener('touchmove', movementFunction, false)
 
     container.appendChild(canvas)
 }
