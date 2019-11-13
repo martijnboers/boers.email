@@ -1,5 +1,5 @@
-var NUM_PARTICLES = ( ( ROWS = 105 ) * ( COLS = 300 ) ),
-    THICKNESS = Math.pow( 80, 2 ),
+let NUM_PARTICLES = ((ROWS = 105) * (COLS = 300)),
+    THICKNESS = Math.pow(80, 2),
     SPACING = 3.5,
     MARGIN = 90,
     COLOR = 185,
@@ -22,102 +22,106 @@ var NUM_PARTICLES = ( ( ROWS = 105 ) * ( COLS = 300 ) ),
     w, h,
     p, s,
     r, c
-;
 
 particle = {
     vx: 0,
     vy: 0,
     x: 0,
-    y: 0
-};
-
-function init() {
-
-    container = document.getElementById( 'container' );
-    canvas = document.createElement( 'canvas' );
-
-    ctx = canvas.getContext( '2d' );
-    man = false;
-    tog = true;
-
-    list = [];
-
-    w = canvas.width = COLS * SPACING + MARGIN * 2;
-    h = canvas.height = ROWS * SPACING + MARGIN * 2;
-
-    container.style.width = w + "px";
-    container.style.height = h + "px";
-
-    for ( i = 0; i < NUM_PARTICLES; i++ ) {
-
-        p = Object.create( particle );
-        p.x = p.ox = MARGIN + SPACING * ( i % COLS );
-        p.y = p.oy = MARGIN + SPACING * Math.floor( i / COLS );
-
-        list[i] = p;
-    }
-
-    container.addEventListener( 'mousemove', function(e) {
-        clearInterval(continueLoop)
-
-        bounds = container.getBoundingClientRect();
-        mx = e.clientX - bounds.left;
-        my = e.clientY - bounds.top;
-        man = true;
-
-        continueLoop = setInterval(function() {
-            man = false;
-        }, 2000);
-
-    });
-
-    container.appendChild( canvas );
+    y: 0,
 }
 
-function step() {
+function init () {
 
-    if ( tog = !tog ) {
+    container = document.getElementById('container')
+    canvas = document.createElement('canvas')
 
-        if ( !man ) {
+    ctx = canvas.getContext('2d')
+    man = false
+    tog = true
 
-            t = +new Date() * 0.001;
-            mx = w * 0.5 + ( Math.cos( t * 1.2 ) * Math.cos( t * 0.9 ) * w * 0.45 );
-            my = h * 0.5 + ( Math.sin( t * 2.3 ) * Math.tan( Math.sin( t * 0.8 ) ) * h * 0.45 );
+    list = []
+
+    if (window.innerWidth <= 800 && window.innerHeight <= 800) {
+        NUM_PARTICLES = ((ROWS = 100) * (COLS = 100))
+        MARGIN = 0
+    }
+
+    w = canvas.width = COLS * SPACING + MARGIN * 2
+    h = canvas.height = ROWS * SPACING + MARGIN * 2
+
+    container.style.width = w + "px"
+    container.style.height = h + "px"
+
+    for (i = 0; i < NUM_PARTICLES; i++) {
+
+        p = Object.create(particle)
+        p.x = p.ox = MARGIN + SPACING * (i % COLS)
+        p.y = p.oy = MARGIN + SPACING * Math.floor(i / COLS)
+
+        list[i] = p
+    }
+
+    container.addEventListener('mousemove', function (e) {
+        clearInterval(continueLoop)
+
+        bounds = container.getBoundingClientRect()
+        mx = e.clientX - bounds.left
+        my = e.clientY - bounds.top
+        man = true
+
+        continueLoop = setInterval(function () {
+            man = false
+        }, 2000)
+
+    })
+
+    container.appendChild(canvas)
+}
+
+function step () {
+
+    if (tog = !tog) {
+
+        if (!man) {
+
+            t = +new Date() * 0.001
+            mx = w * 0.5 + (Math.cos(t * 1.2) * Math.cos(t * 0.9) * w * 0.45)
+            my = h * 0.5 + (Math.sin(t * 2.3) * Math.tan(Math.sin(t * 0.8)) * h * 0.45)
         }
 
-        for ( i = 0; i < NUM_PARTICLES; i++ ) {
+        for (i = 0; i < NUM_PARTICLES; i++) {
 
-            p = list[i];
+            p = list[i]
 
-            d = ( dx = mx - p.x ) * dx + ( dy = my - p.y ) * dy;
-            f = -THICKNESS / d;
+            d = (dx = mx - p.x) * dx + (dy = my - p.y) * dy
+            f = -THICKNESS / d
 
-            if ( d < THICKNESS ) {
-                t = Math.atan2( dy, dx );
-                p.vx += f * Math.cos(t);
-                p.vy += f * Math.sin(t);
+            if (d < THICKNESS) {
+                t = Math.atan2(dy, dx)
+                p.vx += f * Math.cos(t)
+                p.vy += f * Math.sin(t)
             }
 
-            p.x += ( p.vx *= DRAG ) + (p.ox - p.x) * EASE;
-            p.y += ( p.vy *= DRAG ) + (p.oy - p.y) * EASE;
+            p.x += (p.vx *= DRAG) + (p.ox - p.x) * EASE
+            p.y += (p.vy *= DRAG) + (p.oy - p.y) * EASE
 
         }
 
     } else {
 
-        b = ( a = ctx.createImageData( w, h ) ).data;
+        b = (a = ctx.createImageData(w, h)).data
 
-        for ( i = 0; i < NUM_PARTICLES; i++ ) {
+        for (i = 0; i < NUM_PARTICLES; i++) {
 
-            p = list[i];
-            b[n = ( ~~p.x + ( ~~p.y * w ) ) * 4] = b[n+1] = b[n+2] = COLOR, b[n+3] = 255;
+            p = list[i]
+            b[n = (~~p.x + (~~p.y * w)) * 4] = b[n + 1] = b[n + 2] = COLOR, b[n + 3] = 255
         }
 
-        ctx.putImageData( a, 0, 0 );
+        ctx.putImageData(a, 0, 0)
     }
 
-    requestAnimationFrame( step );
+    requestAnimationFrame(step)
 }
 
-init();
-step();
+init()
+step()
