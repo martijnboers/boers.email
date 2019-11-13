@@ -43,7 +43,7 @@ function init () {
 
     if (window.innerWidth <= 800 && window.innerHeight <= 800) {
         NUM_PARTICLES = ((ROWS = 100) * (COLS = 100))
-        MARGIN = 0
+        MARGIN = 5
     }
 
     w = canvas.width = COLS * SPACING + MARGIN * 2
