@@ -1,8 +1,8 @@
-var NUM_PARTICLES = ( ( ROWS = 105 ) * ( COLS = 250 ) ),
-    THICKNESS = Math.pow( 115, 1.75 ),
-    SPACING = 5,
-    MARGIN = 70,
-    COLOR = 180,
+var NUM_PARTICLES = ( ( ROWS = 105 ) * ( COLS = 300 ) ),
+    THICKNESS = Math.pow( 80, 2 ),
+    SPACING = 3.5,
+    MARGIN = 90,
+    COLOR = 185,
     DRAG = 0.95,
     EASE = 0.25,
 
@@ -81,8 +81,8 @@ function step() {
         if ( !man ) {
 
             t = +new Date() * 0.001;
-            mx = w * 0.5 + ( Math.cos( t * 1.4 ) * Math.cos( t * 0.9 ) * w * 0.45 );
-            my = h * 0.5 + ( Math.sin( t * 2.5 ) * Math.tan( Math.sin( t * 0.8 ) ) * h * 0.45 );
+            mx = w * 0.5 + ( Math.cos( t * 1.2 ) * Math.cos( t * 0.9 ) * w * 0.45 );
+            my = h * 0.5 + ( Math.sin( t * 2.3 ) * Math.tan( Math.sin( t * 0.8 ) ) * h * 0.45 );
         }
 
         for ( i = 0; i < NUM_PARTICLES; i++ ) {

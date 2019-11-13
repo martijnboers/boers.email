@@ -83,7 +83,7 @@ ul {
 }
 
 li {
-    padding: 2px 0 4px;
+    padding: 3px 0 4px;
     display: flex;
     justify-content: space-between;
 }
