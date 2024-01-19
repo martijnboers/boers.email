@@ -8,7 +8,7 @@ body {
 
 a {
     color: #fff;
-    text-decoration: none
+    text-decoration: none;
 }
 
 #container,
@@ -84,7 +84,7 @@ ul {
 }
 
 li {
-    padding: 3px 0 4px;
+    padding: 3px 1px 4px;
     display: flex;
     justify-content: space-between;
 }
