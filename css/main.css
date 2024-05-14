@@ -50,6 +50,10 @@ header b {
     text-align: justify;
 }
 
+.blocked .group {
+    line-height: 120%;
+}
+
 h1,
 h2 {
     margin: 0;
@@ -74,7 +78,7 @@ p {
 }
 
 ul {
-    font-size: 13px;
+    font-size: 14px;
     list-style: none;
     padding-right: 4px;
     padding-left: 4px;
@@ -92,7 +96,7 @@ li {
 li strong {
     text-transform: uppercase;
     font-weight: 400;
-    font-size: 13px
+    font-size: 14px
 }
 
 li span {
