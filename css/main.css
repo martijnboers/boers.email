@@ -11,17 +11,23 @@ a {
     text-decoration: none;
 }
 
-#container,
-canvas {
-    position:absolute;
-    top:50%; left:50%;
-    transform: translate(-50%,-50%);
-    will-change: transform;
-    touch-action: none;
+/* Desktop: fullscreen background canvas */
+#container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1;
+    pointer-events: all;
 }
 
-canvas {
-    z-index: -1;
+#container canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: all;
+    touch-action: none;
 }
 
 body {
@@ -169,100 +175,53 @@ li.blocked:has(p) {
     padding-bottom: 18px;
 }
 
-/* Add spacing before animation container */
+/* Desktop: hide mobile animation container */
 li.animation-container {
-    margin-top: 10px;
     display: none;
-    padding: 0;
-    overflow: visible;
-    pointer-events: auto;
-    background: transparent !important;
-}
-
-li.animation-container #container {
-    position: relative;
-    width: 100%;
-    pointer-events: auto;
-}
-
-li.animation-container canvas {
-    pointer-events: auto;
-}
-
-/* Keep tree visible on desktop */
-@media (min-width: 769px) and (orientation: landscape) {
-    li.tree-container {
-        display: block !important;
-    }
 }
 
 /* Mobile/vertical screen adjustments */
 @media (max-width: 768px), (orientation: portrait) {
+    /* Hide desktop fullscreen container on mobile */
+    #container {
+        display: none !important;
+    }
+
     header {
         position: relative;
         max-width: 100%;
         width: calc(100% - 20px);
         margin: 10px;
-        top: auto;
-        left: auto;
-    }
-
-    /* Hide tree SVG on mobile */
-    li.tree-container {
-        display: none;
-    }
-
-    /* Show animation container on mobile */
-    li.animation-container {
-        display: block;
-        background: transparent !important;
-        height: 600px;
-        padding: 0 15px;
-        pointer-events: none;
-    }
-
-    li.animation-container #container {
-        position: relative !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 600px !important;
-        margin: 0 !important;
-        transform: none !important;
-        pointer-events: all !important;
-        touch-action: none !important;
-    }
-
-    li.animation-container canvas {
-        position: relative !important;
-        top: 0 !important;
-        left: 0 !important;
-        transform: none !important;
-        z-index: 1;
-        display: block;
-        margin: 0 auto;
-        pointer-events: all !important;
-        touch-action: none !important;
-    }
-
-    ul {
-        pointer-events: auto;
-    }
-
-    ul li {
-        pointer-events: auto;
-    }
-
-    ul li.animation-container {
-        pointer-events: none !important;
-    }
-
-    ul li.animation-container * {
-        pointer-events: all !important;
     }
 
     body {
         height: auto;
         min-height: 100vh;
+    }
+
+    /* Hide desktop tree on mobile */
+    li.tree-container {
+        display: none;
+    }
+
+    /* Show mobile animation in page flow */
+    li.animation-container {
+        display: block;
+        height: 600px;
+        padding: 0 10px;
+    }
+
+    #container-mobile {
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        position: relative;
+    }
+
+    #container-mobile canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
     }
 }
