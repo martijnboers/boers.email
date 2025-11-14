@@ -1,25 +1,208 @@
-'use strict';
+"use strict";
 
-let NUM_PARTICLES, ROWS, COLS, THICKNESS, SPACING, MARGIN, COLOR, DRAG, EASE;
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+const CONFIG = {
+	// Particle grid
+	SPACING: 3.5,
+	COLOR: 220,
 
-let container, continueLoop, particle, canvas, list, ctx, tog, man;
-let dx, dy, mx, my, d, t, f, a, b, i, n, w, h, p, bounds;
-let startTime, growthDuration, centerX, centerY, accumulatedTime, lastFrameTime;
-let prevMx, prevMy, manualEndTime;
-let debugPanel, showDebug, frameCount, lastFpsTime, fps, isMobile, speedMultiplier;
+	// Particle physics (original values)
+	PARTICLE_DRAG: 0.85,
+	PARTICLE_EASE: 0.20,
+	REPULSION_RADIUS_SQ: Math.pow(65, 2), // Original THICKNESS value (squared distance)
 
-particle = {
-    vx: 0,
-    vy: 0,
-    x: 0,
-    y: 0,
-    distFromCenter: 0,
-    active: false
+	CURSOR_PATH_SPEED_MIN: 80, // Start speed
+	CURSOR_PATH_SPEED_MAX: 160, // End speed (3.5x faster)
+	CURSOR_PATH_RADIUS: 0.3,
+	CURSOR_SPEED_DURATION: 30000, // Time to reach max speed (30 seconds)
+
+	// Cursor physics (stronger spring for smoother tracking at high speeds)
+	CURSOR_SPRING: 0.35,
+	CURSOR_DAMPING: 0.7,
+
+	// Growth animation
+	GROWTH_DURATION: 105000,
+	GROWTH_START_RADIUS: 0.08,
+
+	// Manual interaction
+	MANUAL_TIMEOUT: 2000,
 };
 
+// ============================================================================
+// STATE
+// ============================================================================
+let container, canvas, ctx;
+let list = [];
+let w, h, centerX, centerY;
+let isMobile = false;
+
+// Cursor state
+let cursorX, cursorY; // Actual cursor position
+let cursorVx = 0,
+	cursorVy = 0; // Cursor velocity
+let targetX, targetY; // Target position (from path or manual)
+let pathTime = 0; // Position along automatic path
+let isManual = false; // Manual control active
+let manualTimeout = null;
+
+// Animation state
+let startTime;
+let lastFrameTime;
+let frameToggle = true;
+
+// Debug
+let debugPanel,
+	showDebug = false;
+let frameCount = 0,
+	lastFpsTime,
+	fps = 0;
+
+// ============================================================================
+// PARTICLE SYSTEM
+// ============================================================================
+class Particle {
+	constructor(x, y, centerX, centerY) {
+		this.x = x;
+		this.y = y;
+		this.ox = x; // Original position
+		this.oy = y;
+		this.vx = 0;
+		this.vy = 0;
+
+		// Calculate distance and angle from center for growth animation
+		const dx = x - centerX;
+		const dy = y - centerY;
+		this.distFromCenter = Math.sqrt(dx * dx + dy * dy);
+		this.angle = Math.atan2(dy, dx);
+		this.growthOffset = Math.random() * 0.15; // Random variation
+
+		this.active = false;
+	}
+
+	update(cursorX, cursorY) {
+		if (!this.active) return;
+
+		// Calculate vector from particle to cursor
+		const dx = cursorX - this.x;
+		const dy = cursorY - this.y;
+		const distSq = dx * dx + dy * dy;
+
+		// Apply inverse-square repulsion (original physics)
+		if (distSq < CONFIG.REPULSION_RADIUS_SQ) {
+			// Prevent division by zero and extreme forces
+			const safeDist = Math.max(distSq, 1);
+
+			// Negative force = repulsion (away from cursor)
+			const force = -CONFIG.REPULSION_RADIUS_SQ / safeDist;
+			const angle = Math.atan2(dy, dx);
+
+			this.vx += force * Math.cos(angle);
+			this.vy += force * Math.sin(angle);
+		}
+
+		// Apply drag first (before adding spring force)
+		this.vx *= CONFIG.PARTICLE_DRAG;
+		this.vy *= CONFIG.PARTICLE_DRAG;
+
+		// Spring back to original position
+		this.x += this.vx + (this.ox - this.x) * CONFIG.PARTICLE_EASE;
+		this.y += this.vy + (this.oy - this.y) * CONFIG.PARTICLE_EASE;
+	}
+}
+
+// ============================================================================
+// CURSOR SYSTEM
+// ============================================================================
+function updateCursor(deltaTime) {
+	// Calculate speed progression independent of growth (0-100 scale)
+	const elapsed = Date.now() - startTime;
+	const speedProgress = Math.min(elapsed / CONFIG.CURSOR_SPEED_DURATION, 1);
+
+	// Smooth acceleration using cubic easing
+	const speedValue =
+		CONFIG.CURSOR_PATH_SPEED_MIN +
+		(CONFIG.CURSOR_PATH_SPEED_MAX - CONFIG.CURSOR_PATH_SPEED_MIN) *
+			(speedProgress * speedProgress * speedProgress);
+
+	// Convert 0-100 scale to actual speed multiplier
+	const speed = speedValue / 100;
+
+	if (!isManual) {
+		// Auto mode: update path position and follow it
+		pathTime += deltaTime * speed;
+
+		// Use larger radius on mobile for more dramatic movement
+		const radius = isMobile ? 0.5 : CONFIG.CURSOR_PATH_RADIUS;
+
+		// Add organic variation that increases with speed
+		const variation = speedProgress * 0.3; // Max 30% variation at full speed
+		const wobbleX =
+			Math.sin(pathTime * 2.3) * variation +
+			Math.sin(pathTime * 4.1) * variation * 0.5;
+		const wobbleY =
+			Math.cos(pathTime * 1.7) * variation +
+			Math.cos(pathTime * 3.3) * variation * 0.5;
+
+		// Calculate target on circular path with organic variation
+		targetX = centerX + Math.sin(pathTime) * w * (radius + wobbleX);
+		targetY = centerY + Math.cos(pathTime * 0.8) * h * (radius + wobbleY);
+
+		// Simple lerp
+		cursorX += (targetX - cursorX) * 0.5;
+		cursorY += (targetY - cursorY) * 0.5;
+	} else {
+		// Manual mode: follow user input with spring physics
+		const dx = targetX - cursorX;
+		const dy = targetY - cursorY;
+
+		cursorVx += dx * CONFIG.CURSOR_SPRING;
+		cursorVy += dy * CONFIG.CURSOR_SPRING;
+		cursorVx *= CONFIG.CURSOR_DAMPING;
+		cursorVy *= CONFIG.CURSOR_DAMPING;
+
+		cursorX += cursorVx;
+		cursorY += cursorVy;
+	}
+}
+
+// ============================================================================
+// GROWTH SYSTEM
+// ============================================================================
+function updateGrowth() {
+	const elapsed = Date.now() - startTime;
+	const progress = Math.min(elapsed / CONFIG.GROWTH_DURATION, 1);
+	const easedProgress = 1 - Math.pow(1 - progress, 3); // Ease out cubic
+
+	// Calculate base threshold
+	const radiusProgress =
+		CONFIG.GROWTH_START_RADIUS +
+		easedProgress * (1 - CONFIG.GROWTH_START_RADIUS);
+	const maxDist = Math.max(...list.map((p) => p.distFromCenter));
+	const baseThreshold = maxDist * radiusProgress;
+
+	// Organic growth with sine waves for virus-like asymmetry
+	const time = elapsed * 0.001;
+
+	list.forEach((p) => {
+		const directionalGrowth =
+			Math.sin(p.angle * 3 + time * 0.5) * 0.15 +
+			Math.sin(p.angle * 5 - time * 0.8) * 0.1 +
+			Math.sin(p.angle * 7 + time * 1.2) * 0.08 +
+			Math.sin(time * 2.0 + p.angle) * 0.12;
+
+		const threshold = baseThreshold * (1 + directionalGrowth + p.growthOffset);
+		p.active = p.distFromCenter <= threshold;
+	});
+}
+
+// ============================================================================
+// DEBUG PANEL
+// ============================================================================
 function createDebugPanel() {
-    debugPanel = document.createElement('div');
-    debugPanel.style.cssText = `
+	debugPanel = document.createElement("div");
+	debugPanel.style.cssText = `
         position: fixed;
         top: 10px;
         right: 10px;
@@ -35,400 +218,267 @@ function createDebugPanel() {
         line-height: 1.5;
         display: none;
     `;
-    document.body.appendChild(debugPanel);
-    showDebug = false;
-    frameCount = 0;
-    lastFpsTime = Date.now();
-    fps = 0;
+	document.body.appendChild(debugPanel);
+	frameCount = 0;
+	lastFpsTime = Date.now();
 }
 
 function toggleDebug() {
-    showDebug = !showDebug;
-    debugPanel.style.display = showDebug ? 'block' : 'none';
+	showDebug = !showDebug;
+	debugPanel.style.display = showDebug ? "block" : "none";
 }
 
 function updateDebugPanel() {
-    if (!showDebug || !debugPanel) return;
+	if (!showDebug || !debugPanel) return;
 
-    frameCount++;
-    const now = Date.now();
-    if (now - lastFpsTime >= 1000) {
-        fps = frameCount;
-        frameCount = 0;
-        lastFpsTime = now;
-    }
+	frameCount++;
+	const now = Date.now();
+	if (now - lastFpsTime >= 1000) {
+		fps = frameCount;
+		frameCount = 0;
+		lastFpsTime = now;
+	}
 
-    const activeParticles = list.filter(p => p.active).length;
-    const growthPercent = ((Date.now() - startTime) / growthDuration * 100).toFixed(1);
-    const canvasRect = canvas.getBoundingClientRect();
-    const canvasVisible = canvasRect.width > 0 && canvasRect.height > 0;
-    const canvasStyle = window.getComputedStyle(canvas);
-    const containerStyle = window.getComputedStyle(container);
+	const elapsed = Date.now() - startTime;
+	const growthProgress = Math.min(elapsed / CONFIG.GROWTH_DURATION, 1);
+	const speedProgress = Math.min(elapsed / CONFIG.CURSOR_SPEED_DURATION, 1);
+	const activeParticles = list.filter((p) => p.active).length;
+	const growthPercent = (growthProgress * 100).toFixed(1);
 
-    debugPanel.innerHTML = `
+	// Calculate current speed (0-100 scale)
+	const currentSpeed =
+		CONFIG.CURSOR_PATH_SPEED_MIN +
+		(CONFIG.CURSOR_PATH_SPEED_MAX - CONFIG.CURSOR_PATH_SPEED_MIN) *
+			(speedProgress * speedProgress * speedProgress);
+
+	debugPanel.innerHTML = `
         <strong>🐛 Debug Info</strong><br>
         <br>
         <strong>System:</strong><br>
-        Device: ${isMobile ? 'Mobile' : 'Desktop'}<br>
+        Device: ${isMobile ? "Mobile" : "Desktop"}<br>
         Viewport: ${window.innerWidth}x${window.innerHeight}<br>
-        Container: ${container.id}<br>
-        Container Display: ${containerStyle.display}<br>
-        Container Visible: ${containerStyle.display !== 'none' ? '✅' : '❌'}<br>
-        <br>
-        <strong>Canvas:</strong><br>
-        Dimensions: ${w}x${h}<br>
-        BoundingRect: ${Math.floor(canvasRect.width)}x${Math.floor(canvasRect.height)}<br>
-        Canvas Visible: ${canvasVisible ? '✅' : '❌'}<br>
-        Canvas Display: ${canvasStyle.display}<br>
-        In DOM: ${document.contains(canvas) ? '✅' : '❌'}<br>
+        Canvas: ${w}x${h}<br>
         <br>
         <strong>Performance:</strong><br>
         FPS: ${fps}<br>
-        Frame: ${tog ? 'Physics' : 'Render'}<br>
+        Frame: ${frameToggle ? "Physics" : "Render"}<br>
         <br>
         <strong>Particles:</strong><br>
-        Total: ${NUM_PARTICLES}<br>
+        Total: ${list.length}<br>
         Active: ${activeParticles}<br>
-        Growth: ${Math.min(growthPercent, 100)}%<br>
+        Growth: ${growthPercent}%<br>
         <br>
         <strong>Cursor:</strong><br>
-        Mode: ${man ? 'Manual' : 'Auto'}<br>
-        Pos: ${Math.floor(mx)}, ${Math.floor(my)}<br>
-        Speed: ${speedMultiplier ? speedMultiplier.toFixed(2) : 'N/A'}x<br>
+        Mode: ${isManual ? "Manual" : "Auto"}<br>
+        Pos: ${Math.floor(cursorX)}, ${Math.floor(cursorY)}<br>
+        Velocity: ${Math.floor(Math.sqrt(cursorVx * cursorVx + cursorVy * cursorVy))}<br>
+        Speed: ${Math.floor(currentSpeed)}/100<br>
         <br>
         <em>Desktop: Press ?<br>Mobile: 3-finger tap</em>
     `;
 }
 
 function setupMobileDebug() {
-    if (!isMobile) return;
+	if (!isMobile) return;
 
-    // Three-finger tap anywhere on screen to toggle debug
-    let touchCount = 0;
-    document.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 3) {
-            touchCount++;
-            if (touchCount === 1) {
-                setTimeout(() => {
-                    if (touchCount === 1) {
-                        toggleDebug();
-                    }
-                    touchCount = 0;
-                }, 300);
-            }
-        }
-    }, { passive: true });
+	let touchCount = 0;
+	document.addEventListener(
+		"touchstart",
+		(e) => {
+			if (e.touches.length === 3) {
+				touchCount++;
+				if (touchCount === 1) {
+					setTimeout(() => {
+						if (touchCount === 1) toggleDebug();
+						touchCount = 0;
+					}, 300);
+				}
+			}
+		},
+		{ passive: true },
+	);
 }
 
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
 function init() {
-    isMobile = window.innerWidth <= 768 || window.matchMedia('(orientation: portrait)').matches;
+	// Detect mobile
+	isMobile =
+		window.innerWidth <= 768 ||
+		window.matchMedia("(orientation: portrait)").matches;
 
-    // Create debug panel
-    createDebugPanel();
+	// Setup debug
+	createDebugPanel();
+	document.addEventListener("keydown", (e) => {
+		if (e.key === "?") toggleDebug();
+	});
+	setupMobileDebug();
 
-    // Setup keyboard shortcut for desktop
-    document.addEventListener('keydown', (e) => {
-        if (e.key === '?') {
-            toggleDebug();
-        }
-    });
+	// Get container
+	const containerId = isMobile ? "container-mobile" : "container";
+	container = document.getElementById(containerId);
+	if (!container) {
+		console.error("Container not found:", containerId);
+		return;
+	}
 
-    // Setup mobile debug controls
-    setupMobileDebug();
+	// Create canvas
+	canvas = document.createElement("canvas");
+	ctx = canvas.getContext("2d", { alpha: false });
 
-    // Use different container for mobile vs desktop
-    const containerId = isMobile ? 'container-mobile' : 'container';
-    container = document.getElementById(containerId);
+	// Calculate dimensions
+	const vw = window.innerWidth;
+	const vh = window.innerHeight;
 
-    if (!container) {
-        console.error('Container not found:', containerId);
-        return;
-    }
+	if (isMobile) {
+		// Use full viewport width on mobile
+		w = canvas.width = vw;
+		h = canvas.height = 600;
+	} else {
+		w = canvas.width = vw;
+		h = canvas.height = vh;
+	}
 
-    canvas = document.createElement('canvas');
-    ctx = canvas.getContext('2d', { alpha: false });
-    man = false;
-    tog = true;
-    list = [];
+	centerX = w * 0.5;
+	centerY = h * 0.5;
 
-    // Simple responsive config based on viewport
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+	// Calculate grid size (use margin to keep particles away from edges)
+	let marginH, marginV; // horizontal and vertical margins
+	if (isMobile) {
+		marginH = marginV = w * 0.05;
+	} else {
+		// Desktop: keep horizontal padding, reduce vertical padding for more height
+		marginH = Math.min(vw, vh) * 0.15; // Same horizontal padding
+		marginV = Math.min(vw, vh) * 0.05; // Much less vertical padding
+	}
+	const gridWidth = w - marginH * 2;
+	const gridHeight = h - marginV * 2;
+	const cols = Math.floor(gridWidth / CONFIG.SPACING);
+	const rows = Math.floor(gridHeight / CONFIG.SPACING);
 
-    if (isMobile) {
-        // Mobile: contained in 600px section
-        SPACING = 3.5;
-        THICKNESS = Math.pow(50, 2);
+	// Create particles
+	const offsetX = (w - cols * CONFIG.SPACING) / 2;
+	const offsetY = (h - rows * CONFIG.SPACING) / 2;
 
-        // Get actual container dimensions (accounts for padding and borders)
-        const containerRect = container.getBoundingClientRect();
-        w = canvas.width = containerRect.width;
-        h = canvas.height = 600;
+	for (let row = 0; row < rows; row++) {
+		for (let col = 0; col < cols; col++) {
+			const x = offsetX + col * CONFIG.SPACING;
+			const y = offsetY + row * CONFIG.SPACING;
+			list.push(new Particle(x, y, centerX, centerY));
+		}
+	}
 
-        // Grid uses 90% of canvas (5% margin on each side)
-        MARGIN = w * 0.05;
-        const gridWidth = w * 0.9;
-        const gridHeight = h * 0.9;
+	// Initialize cursor
+	cursorX = targetX = centerX;
+	cursorY = targetY = centerY;
 
-        COLS = Math.floor(gridWidth / SPACING);
-        ROWS = Math.floor(gridHeight / SPACING);
-    } else if (vw <= 1024) {
-        // Tablets and small laptops - use 70% of screen (15% margin on all sides)
-        THICKNESS = Math.pow(60, 2);
-        SPACING = 3.5;
+	// Initialize timing
+	startTime = Date.now();
+	lastFrameTime = startTime;
 
-        const gridWidth = vw * 0.7;
-        const gridHeight = vh * 0.7;
-        MARGIN = vw * 0.15;
+	// Input handlers
+	const handleInput = (clientX, clientY) => {
+		if (manualTimeout) clearTimeout(manualTimeout);
 
-        w = canvas.width = vw;
-        h = canvas.height = vh;
+		const bounds = canvas.getBoundingClientRect();
+		targetX = (clientX - bounds.left) * (w / bounds.width);
+		targetY = (clientY - bounds.top) * (h / bounds.height);
 
-        COLS = Math.floor(gridWidth / SPACING);
-        ROWS = Math.floor(gridHeight / SPACING);
-    } else {
-        // Desktop - use 70% of screen (15% margin on all sides)
-        THICKNESS = Math.pow(80, 2);
-        SPACING = 3.5;
+		if (!isManual) {
+			// Just switched to manual - reset velocity for clean transition
+			cursorVx = 0;
+			cursorVy = 0;
+		}
+		isManual = true;
 
-        const gridWidth = vw * 0.6;
-        const gridHeight = vh * 0.6;
-        MARGIN = vw * 0.15;
+		manualTimeout = setTimeout(() => {
+			isManual = false;
+			// pathTime keeps running, so cursor smoothly blends back to current path position
+			cursorVx = 0;
+			cursorVy = 0;
+		}, CONFIG.MANUAL_TIMEOUT);
+	};
 
-        w = canvas.width = vw;
-        h = canvas.height = vh;
+	if (isMobile) {
+		canvas.addEventListener(
+			"touchstart",
+			(e) => {
+				if (e.touches.length > 0) {
+					handleInput(e.touches[0].clientX, e.touches[0].clientY);
+				}
+			},
+			{ passive: true },
+		);
+		canvas.addEventListener(
+			"touchmove",
+			(e) => {
+				if (e.touches.length > 0) {
+					handleInput(e.touches[0].clientX, e.touches[0].clientY);
+				}
+			},
+			{ passive: true },
+		);
+	} else {
+		document.addEventListener("mousemove", (e) => {
+			handleInput(e.clientX, e.clientY);
+		});
+	}
 
-        COLS = Math.floor(gridWidth / SPACING);
-        ROWS = Math.floor(gridHeight / SPACING);
-    }
-
-    COLOR = 220;
-    DRAG = 0.95;
-    EASE = 0.25;
-    NUM_PARTICLES = ROWS * COLS;
-
-    // Growth settings
-    startTime = Date.now();
-    growthDuration = 45000; // 45 seconds to full growth
-    centerX = w * 0.5;
-    centerY = h * 0.5;
-    accumulatedTime = 0;
-    lastFrameTime = Date.now();
-    mx = prevMx = centerX;
-    my = prevMy = centerY;
-    manualEndTime = null;
-    speedMultiplier = 0.5;
-
-    // Create particles and calculate distance from center
-    const offsetX = (w - (COLS * SPACING)) / 2;
-    const offsetY = (h - (ROWS * SPACING)) / 2;
-
-    let maxDist = 0;
-
-    for (i = 0; i < NUM_PARTICLES; i++) {
-        p = Object.create(particle);
-        p.x = p.ox = offsetX + SPACING * (i % COLS);
-        p.y = p.oy = offsetY + SPACING * Math.floor(i / COLS);
-
-        // Calculate base circular distance and angle from center
-        const dcx = p.ox - centerX;
-        const dcy = p.oy - centerY;
-        p.baseDist = Math.sqrt(dcx * dcx + dcy * dcy);
-        p.angle = Math.atan2(dcy, dcx);
-
-        // Add organic variation per particle
-        p.growthOffset = Math.random() * 0.15; // Random variation per particle
-        p.active = false;
-
-        maxDist = Math.max(maxDist, p.baseDist);
-
-        list[i] = p;
-    }
-
-    // Store max distance for threshold calculation
-    container.maxDist = maxDist;
-
-    const updateCursorPosition = (clientX, clientY) => {
-        clearInterval(continueLoop);
-
-        // Map to canvas coordinates
-        bounds = canvas.getBoundingClientRect();
-        const targetX = (clientX - bounds.left) * (w / bounds.width);
-        const targetY = (clientY - bounds.top) * (h / bounds.height);
-
-        // Heavy smoothing for manual control too - 20% per frame
-        mx += (targetX - mx) * 0.2;
-        my += (targetY - my) * 0.2;
-        man = true;
-
-        // Return to automatic mode after 2 seconds of no movement
-        continueLoop = setInterval(() => {
-            man = false;
-            manualEndTime = Date.now();
-        }, 2000);
-    };
-
-    const mouseMoveHandler = (e) => {
-        updateCursorPosition(e.clientX, e.clientY);
-    };
-
-    const touchHandler = (e) => {
-        if (e.touches && e.touches.length > 0) {
-            updateCursorPosition(e.touches[0].clientX, e.touches[0].clientY);
-        }
-    };
-
-    // Listen on document for desktop, canvas for mobile
-    if (isMobile) {
-        canvas.addEventListener('touchstart', touchHandler, { passive: true });
-        canvas.addEventListener('touchmove', touchHandler, { passive: true });
-    } else {
-        document.addEventListener('mousemove', mouseMoveHandler);
-    }
-
-    container.appendChild(canvas);
+	container.appendChild(canvas);
 }
 
-function easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
-}
-
-function easeInCubic(t) {
-    return t * t * t;
-}
-
+// ============================================================================
+// MAIN ANIMATION LOOP
+// ============================================================================
 function step() {
-    // Calculate growth progress
-    const elapsed = Date.now() - startTime;
-    const growthProgress = Math.min(elapsed / growthDuration, 1);
-    const easedProgress = easeOutCubic(growthProgress);
+	const now = Date.now();
+	const deltaTime = (now - lastFrameTime) * 0.001;
+	lastFrameTime = now;
 
-    // Calculate base threshold - starts small, expands outward
-    const minRadius = 0.08; // Start with 8% visible (small center)
-    const radiusProgress = minRadius + easedProgress * (1 - minRadius);
-    const baseThreshold = container.maxDist * radiusProgress;
+	// Update growth (which particles are active)
+	updateGrowth();
 
-    // Create asymmetric, virus-like growth using multiple sine waves at different frequencies
-    const time = elapsed * 0.001;
+	// Update cursor EVERY frame to avoid jumpiness
+	updateCursor(deltaTime);
 
-    // Activate particles based on organic, asymmetric threshold
-    for (i = 0; i < NUM_PARTICLES; i++) {
-        p = list[i];
+	// Alternate between physics and render frames
+	if ((frameToggle = !frameToggle)) {
+		// PHYSICS FRAME
+		// Update all active particles
+		list.forEach((p) => p.update(cursorX, cursorY));
+	} else {
+		// RENDER FRAME
 
-        // Create organic, directional growth variations based on angle
-        // Multiple frequencies create complex, virus-like patterns
-        const directionalGrowth =
-            Math.sin(p.angle * 3 + time * 0.5) * 0.15 +      // 3 lobes, slow rotation
-            Math.sin(p.angle * 5 - time * 0.8) * 0.1 +       // 5 lobes, faster rotation
-            Math.sin(p.angle * 7 + time * 1.2) * 0.08 +      // 7 lobes, more detail
-            Math.sin(time * 2.0 + p.angle) * 0.12;           // Pulsing asymmetry
+		const imageData = ctx.createImageData(w, h);
+		const data = imageData.data;
 
-        // Apply directional growth to threshold (grows more in some directions)
-        const particleThreshold = baseThreshold * (1 + directionalGrowth + p.growthOffset);
+		// Fill background with black
+		for (let i = 0; i < data.length; i += 4) {
+			data[i] = data[i + 1] = data[i + 2] = 0; // RGB: black
+			data[i + 3] = 255; // Alpha: opaque
+		}
 
-        // Activate particle if within organic threshold
-        p.active = p.baseDist <= particleThreshold;
-    }
+		// Draw active particles
+		list.forEach((p) => {
+			if (!p.active) return;
 
-    if (tog = !tog) {
-        // Physics update frame
-        if (!man) {
-            const now = Date.now();
-            const deltaTime = (now - lastFrameTime) * 0.001;
-            lastFrameTime = now;
+			const px = Math.floor(p.x);
+			const py = Math.floor(p.y);
 
-            // Simple time-based speed increase
-            const timeProgress = Math.min(elapsed / growthDuration, 1);
+			// Skip if out of bounds
+			if (px < 0 || px >= w || py < 0 || py >= h) return;
 
-            // Smooth acceleration from 1.0x to 2.0x over the full duration
-            speedMultiplier = 1.0 + (easeInCubic(timeProgress) * 1.0);
+			const idx = (px + py * w) * 4;
+			data[idx] = data[idx + 1] = data[idx + 2] = CONFIG.COLOR;
+			data[idx + 3] = 255;
+		});
 
-            // Use real time for smooth motion
-            accumulatedTime += deltaTime;
-            t = accumulatedTime;
+		ctx.putImageData(imageData, 0, 0);
+	}
 
-            // Apply speed to the circular motion itself
-            const autoMx = w * 0.5 + Math.sin(t * speedMultiplier) * w * 0.4;
-            const autoMy = h * 0.5 + Math.cos(t * speedMultiplier * 0.8) * h * 0.4;
-
-            // Adaptive smoothing: increase smoothing factor as speed increases
-            // This prevents the cursor from lagging behind when moving fast
-            const smoothingFactor = 0.03 * speedMultiplier;
-
-            // Smooth transition from manual to automatic
-            if (manualEndTime) {
-                const timeSinceManual = (now - manualEndTime) / 1000;
-                const blendAmount = Math.min(timeSinceManual / 1.5, 1);
-                mx += (autoMx - mx) * blendAmount * 0.05;
-                my += (autoMy - my) * blendAmount * 0.05;
-
-                if (blendAmount >= 1) {
-                    manualEndTime = null;
-                }
-            } else {
-                // Adaptive smoothing scales with speed to prevent lag
-                mx += (autoMx - mx) * smoothingFactor;
-                my += (autoMy - my) * smoothingFactor;
-            }
-        }
-
-        // Update particle physics (only active particles)
-        // NO sub-stepping - simple and smooth
-        for (i = 0; i < NUM_PARTICLES; i++) {
-            p = list[i];
-            if (!p.active) continue;
-
-            dx = mx - p.x;
-            dy = my - p.y;
-            d = dx * dx + dy * dy;
-
-            if (d < THICKNESS) {
-                f = -THICKNESS / d;
-                t = Math.atan2(dy, dx);
-                p.vx += f * Math.cos(t);
-                p.vy += f * Math.sin(t);
-            }
-
-            p.vx *= DRAG;
-            p.vy *= DRAG;
-            p.x += p.vx + (p.ox - p.x) * EASE;
-            p.y += p.vy + (p.oy - p.y) * EASE;
-        }
-
-        // Store cursor position for next frame
-        prevMx = mx;
-        prevMy = my;
-    } else {
-        // Render frame
-        a = ctx.createImageData(w, h);
-        b = a.data;
-
-        // Fill background with black
-        for (i = 0; i < b.length; i += 4) {
-            b[i] = b[i + 1] = b[i + 2] = 0;     // RGB: black
-            b[i + 3] = 255;                      // Alpha: opaque
-        }
-
-        // Draw particles (only active ones)
-        for (i = 0; i < NUM_PARTICLES; i++) {
-            p = list[i];
-            if (!p.active) continue;
-
-            // Skip particles that are out of bounds
-            const px = ~~p.x;
-            const py = ~~p.y;
-            if (px < 0 || px >= w || py < 0 || py >= h) continue;
-
-            n = (px + py * w) * 4;
-            b[n] = b[n + 1] = b[n + 2] = COLOR;
-            b[n + 3] = 255;
-        }
-
-        ctx.putImageData(a, 0, 0);
-    }
-
-    updateDebugPanel();
-    requestAnimationFrame(step);
+	updateDebugPanel();
+	requestAnimationFrame(step);
 }
 
 // Initialize and start animation
