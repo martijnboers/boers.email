@@ -96,6 +96,7 @@ p {
     vertical-align: middle;
     object-fit: cover;
     opacity: 0.8 !important;
+    filter: brightness(0.7);
 }
 
 ul {
