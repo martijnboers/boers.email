@@ -1,3 +1,8 @@
-document.addEventListener('DOMContentLoaded', function(){
-    document.getElementById("year").innerHTML = new Date().getFullYear();
-}, false);
+'use strict';
+
+document.addEventListener('DOMContentLoaded', () => {
+    const yearElement = document.getElementById("year");
+    if (yearElement) {
+        yearElement.textContent = new Date().getFullYear();
+    }
+});
