@@ -13,7 +13,10 @@ particle = {
 };
 
 function init() {
-    container = document.getElementById('container');
+    const isMobile = window.innerWidth <= 768 || window.matchMedia('(orientation: portrait)').matches;
+
+    // Use different container for mobile vs desktop
+    container = document.getElementById(isMobile ? 'container-mobile' : 'container');
     if (!container) return;
 
     canvas = document.createElement('canvas');
@@ -26,34 +29,46 @@ function init() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    if (vw <= 600) {
-        // Small phones
-        ROWS = 80;
-        COLS = 80;
+    if (isMobile) {
+        // Mobile: vertical orientation - swap width and height
+        const containerRect = container.getBoundingClientRect();
+        const containerWidth = containerRect.width || vw - 40;
+
         MARGIN = 10;
+        SPACING = 3.5;
+        // Make it vertical: fewer columns, more rows
+        COLS = Math.floor((containerWidth - MARGIN * 2) / SPACING);
+        ROWS = Math.floor((600 - MARGIN * 2) / SPACING);  // Much taller
         THICKNESS = Math.pow(50, 2);
+
+        w = canvas.width = containerWidth;
+        h = canvas.height = 600;
     } else if (vw <= 1024) {
         // Tablets and small laptops
         ROWS = 100;
         COLS = Math.floor(vw / 3.5);
         MARGIN = 30;
         THICKNESS = Math.pow(60, 2);
+        SPACING = 3.5;
+
+        w = canvas.width = COLS * SPACING + MARGIN * 2;
+        h = canvas.height = ROWS * SPACING + MARGIN * 2;
     } else {
         // Desktop
         ROWS = 105;
         COLS = 300;
         MARGIN = 90;
         THICKNESS = Math.pow(80, 2);
+        SPACING = 3.5;
+
+        w = canvas.width = COLS * SPACING + MARGIN * 2;
+        h = canvas.height = ROWS * SPACING + MARGIN * 2;
     }
 
-    SPACING = 3.5;
     COLOR = 220;
     DRAG = 0.95;
     EASE = 0.25;
     NUM_PARTICLES = ROWS * COLS;
-
-    w = canvas.width = COLS * SPACING + MARGIN * 2;
-    h = canvas.height = ROWS * SPACING + MARGIN * 2;
 
     container.style.width = w + 'px';
     container.style.height = h + 'px';

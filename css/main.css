@@ -27,7 +27,8 @@ canvas {
 body {
     width: 100vw;
     height: 100vh;
-    font-family: "Computer Modern Serif", serif;
+    font-family: "JetBrains Mono", monospace;
+    letter-spacing: 0.02em;
 }
 
 header {
@@ -54,24 +55,37 @@ header b {
     line-height: 120%;
 }
 
-h1,
+h1 {
+    margin: 0;
+    font-weight: 500;
+    font-size: 18px;
+    text-transform: uppercase;
+    line-height: 1.3;
+    letter-spacing: 0.05em;
+}
+
 h2 {
     margin: 0;
-    padding-bottom: 5px;
+    padding-bottom: 12px;
     font-weight: 300;
-    font-size: 16px;
+    font-size: 13px;
     text-transform: uppercase;
-    line-height: 16px;
+    line-height: 1.4;
+    letter-spacing: 0.08em;
+    opacity: 0.85;
 }
 
 dl,
 p {
-    font-weight: 100;
-    font-family: "Computer Modern Typewriter Light", serif;
+    font-weight: 300;
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: 0.01em;
 }
 
 .tree {
-    width: 380px;
+    width: 100%;
+    max-width: 380px;
     height: 400px;
     vertical-align: middle;
     object-fit: cover;
@@ -82,9 +96,22 @@ ul {
     list-style: none;
     padding-right: 4px;
     padding-left: 4px;
-    margin-top: 18px;
     border: 1px solid hsla(0, 0%, 100%, .3);
     pointer-events: auto;
+}
+
+ul.header-section {
+    margin-top: 18px;
+    margin-bottom: 15px;
+}
+
+ul.visual-section {
+    margin-top: 0;
+    margin-bottom: 15px;
+}
+
+ul.contact-section {
+    margin-top: 0;
 }
 
 li {
@@ -107,19 +134,23 @@ li + li {
     border-top: 1px solid hsla(0, 0%, 100%, .3)
 }
 
-/* Remove borders between name and title */
-li.blocked + li.blocked {
+/* Remove borders in header section */
+ul.header-section li + li {
     border-top: none;
 }
 
-/* Keep border after bio text (before SVG) */
-li.blocked + li.tree-container {
-    border-top: 1px solid hsla(0, 0%, 100%, .3);
+/* Remove borders in visual section */
+ul.visual-section li:first-child {
+    border-top: none;
 }
 
-/* Keep border after SVG */
-li.tree-container + li {
-    border-top: 1px solid hsla(0, 0%, 100%, .3);
+ul.visual-section li.animation-container {
+    border-top: none;
+}
+
+/* Remove border on first contact item */
+ul.contact-section li:first-child {
+    border-top: none;
 }
 
 li.tree-container {
@@ -130,4 +161,108 @@ li.tree-container {
 li h1, li h2, li p {
     margin: 0;
     width: 100%;
+}
+
+/* Add spacing around bio text */
+li.blocked:has(p) {
+    padding-top: 4px;
+    padding-bottom: 18px;
+}
+
+/* Add spacing before animation container */
+li.animation-container {
+    margin-top: 10px;
+    display: none;
+    padding: 0;
+    overflow: visible;
+    pointer-events: auto;
+    background: transparent !important;
+}
+
+li.animation-container #container {
+    position: relative;
+    width: 100%;
+    pointer-events: auto;
+}
+
+li.animation-container canvas {
+    pointer-events: auto;
+}
+
+/* Keep tree visible on desktop */
+@media (min-width: 769px) and (orientation: landscape) {
+    li.tree-container {
+        display: block !important;
+    }
+}
+
+/* Mobile/vertical screen adjustments */
+@media (max-width: 768px), (orientation: portrait) {
+    header {
+        position: relative;
+        max-width: 100%;
+        width: calc(100% - 20px);
+        margin: 10px;
+        top: auto;
+        left: auto;
+    }
+
+    /* Hide tree SVG on mobile */
+    li.tree-container {
+        display: none;
+    }
+
+    /* Show animation container on mobile */
+    li.animation-container {
+        display: block;
+        background: transparent !important;
+        height: 600px;
+        padding: 0 15px;
+        pointer-events: none;
+    }
+
+    li.animation-container #container {
+        position: relative !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 600px !important;
+        margin: 0 !important;
+        transform: none !important;
+        pointer-events: all !important;
+        touch-action: none !important;
+    }
+
+    li.animation-container canvas {
+        position: relative !important;
+        top: 0 !important;
+        left: 0 !important;
+        transform: none !important;
+        z-index: 1;
+        display: block;
+        margin: 0 auto;
+        pointer-events: all !important;
+        touch-action: none !important;
+    }
+
+    ul {
+        pointer-events: auto;
+    }
+
+    ul li {
+        pointer-events: auto;
+    }
+
+    ul li.animation-container {
+        pointer-events: none !important;
+    }
+
+    ul li.animation-container * {
+        pointer-events: all !important;
+    }
+
+    body {
+        height: auto;
+        min-height: 100vh;
+    }
 }
