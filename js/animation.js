@@ -11,7 +11,7 @@ const CONFIG = {
 
 	// Particle physics
 	PARTICLE_DRAG: 0.92,
-	PARTICLE_EASE: 0.35,
+	PARTICLE_EASE: 0.12, // Gentler spring-back to reduce snapping
 	REPULSION_RADIUS: 80,
 	REPULSION_STRENGTH: 1.0,
 	SPIRAL_STRENGTH_BASE: 0.3,
@@ -28,14 +28,14 @@ const CONFIG = {
 
 	// Growth animation
 	GROWTH_DURATION: 180000, // 3 minutes
-	GROWTH_START_RADIUS: 0.08,
+	GROWTH_START_RADIUS: 0.05, // Start slightly smaller than original (was 0.08)
 
-	// Virus outbreaks
-	OUTBREAK_SPAWN_MIN: 35000,
-	OUTBREAK_SPAWN_MAX: 18000,
-	OUTBREAK_SPAWN_MIN_MOBILE: 40000,
-	OUTBREAK_SPAWN_MAX_MOBILE: 22000,
-	OUTBREAK_GROWTH_RATE: 0.4,
+	// Virus outbreaks - desktop spawns faster to match cursor advantage
+	OUTBREAK_SPAWN_MIN: 35000, // 35 seconds when losing (desktop) - more breathing room
+	OUTBREAK_SPAWN_MAX: 18000, // 18 seconds when winning (desktop)
+	OUTBREAK_SPAWN_MIN_MOBILE: 40000, // 40 seconds when losing (mobile)
+	OUTBREAK_SPAWN_MAX_MOBILE: 22000, // 22 seconds when winning (mobile)
+	OUTBREAK_GROWTH_RATE: 0.35, // Slower growth to keep playable space
 	OUTBREAK_GROWTH_RATE_MOBILE: 0.35,
 	OUTBREAK_MAX_RADIUS: 140,
 	OUTBREAK_MAX_RADIUS_MOBILE: 120,
@@ -43,13 +43,13 @@ const CONFIG = {
 	OUTBREAK_DAMAGE_RADIUS: 100,
 	OUTBREAK_DISSOLVE_RADIUS: 25,
 	OUTBREAK_PULL_RADIUS_MIN: 0.5, // Start pulling at 50% of virus size
-	OUTBREAK_PULL_RADIUS_MAX: 2.0, // Can pull up to 2.0x virus size (reduced from 2.5)
+	OUTBREAK_PULL_RADIUS_MAX: 2.5, // Original pull radius for beautiful visuals
 
 	// Anomalies
-	ANOMALY_SPAWN_MIN: 12000,
-	ANOMALY_SPAWN_MAX: 20000,
-	ANOMALY_SPAWN_MIN_MOBILE: 25000,
-	ANOMALY_SPAWN_MAX_MOBILE: 40000,
+	ANOMALY_SPAWN_MIN: 8000, // Spawn more frequently (was 12000)
+	ANOMALY_SPAWN_MAX: 15000, // (was 20000)
+	ANOMALY_SPAWN_MIN_MOBILE: 18000, // (was 25000)
+	ANOMALY_SPAWN_MAX_MOBILE: 30000, // (was 40000)
 	ANOMALY_ORBIT_RADIUS: 40,
 	ANOMALY_ORBIT_SPEED: 0.02,
 	ANOMALY_DRIFT_SPEED: 0.3,
@@ -58,8 +58,8 @@ const CONFIG = {
 	ANOMALY_DISSOLVE_RADIUS: 20,
 
 	// Energy Stations
-	STATION_SPAWN_MIN: 30000,
-	STATION_SPAWN_MAX: 60000,
+	STATION_SPAWN_MIN: 40000, // Spawn less frequently (was 30000)
+	STATION_SPAWN_MAX: 75000, // (was 60000)
 	STATION_DRIFT_SPEED: 0.15,
 	STATION_CAPTURE_RADIUS: 35,
 	STATION_LIFETIME: 75000, // 75 seconds before despawn
@@ -70,6 +70,14 @@ const CONFIG = {
 	SYNERGY_GROWTH_BOOST: 1.8, // Virus grows faster near anomaly
 	SYNERGY_REGEN_BOOST: 3.0, // Virus regenerates faster near anomaly
 	SYNERGY_PROTECTION: 0.5, // Virus takes less damage near anomaly
+
+	// Shock wave system - affects particles only
+	SHOCK_WAVE_COOLDOWN: 45000, // 45 seconds between shock waves
+	SHOCK_WAVE_COOLDOWN_MOBILE: 35000, // 35 seconds on mobile
+	SHOCK_WAVE_EXPANSION_SPEED: 12.0, // Wave expansion speed
+	SHOCK_WAVE_LIFETIME: 2500, // Wave lasts 2.5 seconds
+	SHOCK_WAVE_THICKNESS: 60, // Thickness of the wave ring
+	SHOCK_WAVE_PARTICLE_DISABLE_DURATION: 4000, // Particles stay dark for 4 seconds after hit
 };
 
 // ============================================================================
@@ -77,6 +85,7 @@ const CONFIG = {
 // ============================================================================
 let container, canvas, ctx;
 let list = [];
+let initialParticleCount = 0; // Track initial grid size to prevent over-spawning
 let w, h, centerX, centerY;
 let isMobile = false;
 
@@ -130,6 +139,14 @@ let cursorBuffs = {
 	blackHoleKillBoostEndTime: 0,
 };
 
+// Shock wave state (disabled - cursor spawns particles instead)
+let shockWaves = [];
+let nextShockWaveTime = 0;
+
+// Cursor particle spawning
+let lastCursorSpawnTime = 0;
+let cursorDelay = 0; // Random delay before cursor becomes active (10-13 seconds)
+
 // Animation state
 let startTime;
 let lastFrameTime;
@@ -170,6 +187,81 @@ class Particle {
 		// Organic behavior traits
 		this.nervousness = 0.8 + Math.random() * 0.4;
 		this.awareness = Math.random() * 40 + 25;
+
+		// Shock wave effect
+		this.shockDisabledUntil = 0;
+
+		// Consumption tracking - marked for permanent removal by black holes
+		this.consumed = false;
+
+		// Smooth fade for grow/shrink effect
+		this.fadeAlpha = 0.0; // 0 = invisible, 1 = fully visible
+	}
+
+	// Lightweight cursor repulsion for render frames (prevents trails when cursor moves fast)
+	applyCursorRepulsion(cursorX, cursorY, radiusMult) {
+		if (!this.active) return;
+
+		// Check if cursor is active yet (random 10-13 second delay at start)
+		const now = Date.now();
+		const cursorFadeInDuration = 2000;
+		const timeSinceStart = now - startTime;
+		const cursorActive = timeSinceStart >= cursorDelay;
+		if (!cursorActive) return; // Skip repulsion during delay
+
+		// Smooth fade-in for cursor radius (prevents splash)
+		let cursorFadeIn = 1.0;
+		if (timeSinceStart < cursorDelay + cursorFadeInDuration) {
+			const fadeProgress = Math.max(0, timeSinceStart - cursorDelay) / cursorFadeInDuration;
+			cursorFadeIn = fadeProgress * fadeProgress; // Ease-in
+		}
+
+		const dx = cursorX - this.x;
+		const dy = cursorY - this.y;
+		const distSq = dx * dx + dy * dy;
+
+		// Calculate buff multipliers (same as full update)
+		let buffRadiusMultiplier = 1.0;
+		let buffForceMultiplier = 1.0;
+		const manualReduction = isManual ? 0.3 : 1.0;
+
+		if (cursorBuffs.shieldActive) {
+			buffRadiusMultiplier = 1.0 + (0.8 * manualReduction);
+		}
+		if (cursorBuffs.damageBoostActive) {
+			buffRadiusMultiplier = Math.max(buffRadiusMultiplier, 1.0 + (1.0 * manualReduction));
+		}
+		if (cursorBuffs.blackHoleKillBoostActive) {
+			buffRadiusMultiplier = 1.0 + (1.5 * manualReduction);
+		}
+
+		const dynamicRadiusSq =
+			CONFIG.REPULSION_RADIUS *
+			CONFIG.REPULSION_RADIUS *
+			radiusMult *
+			radiusMult *
+			buffRadiusMultiplier *
+			buffRadiusMultiplier *
+			cursorFadeIn * // Apply fade-in to radius
+			cursorFadeIn;
+
+		// Apply repulsion force only (no spiral, no anticipation)
+		if (distSq < dynamicRadiusSq) {
+			const safeDist = Math.max(distSq, 1);
+			const baseForce =
+				(-dynamicRadiusSq / safeDist) * CONFIG.REPULSION_STRENGTH * buffForceMultiplier;
+			const force = baseForce * this.nervousness * 0.5; // Half strength to avoid double-force
+			const angle = Math.atan2(dy, dx);
+
+			this.vx += force * Math.cos(angle);
+			this.vy += force * Math.sin(angle);
+		}
+
+		// Apply velocity and drag
+		this.x += this.vx;
+		this.y += this.vy;
+		this.vx *= CONFIG.PARTICLE_DRAG;
+		this.vy *= CONFIG.PARTICLE_DRAG;
 	}
 
 	update(
@@ -184,6 +276,20 @@ class Particle {
 	) {
 		if (!this.active) return;
 
+		const now = Date.now();
+
+		// Check if cursor is active yet (random 10-13 second delay at start)
+		const cursorFadeInDuration = 2000; // 2 seconds to fade in
+		const timeSinceStart = now - startTime;
+		const cursorActive = timeSinceStart >= cursorDelay;
+
+		// Smooth fade-in for cursor radius (prevents splash)
+		let cursorFadeIn = 1.0;
+		if (timeSinceStart < cursorDelay + cursorFadeInDuration) {
+			const fadeProgress = Math.max(0, timeSinceStart - cursorDelay) / cursorFadeInDuration;
+			cursorFadeIn = fadeProgress * fadeProgress; // Ease-in
+		}
+
 		const dx = cursorX - this.x;
 		const dy = cursorY - this.y;
 		const distSq = dx * dx + dy * dy;
@@ -194,7 +300,6 @@ class Particle {
 		let buffForceMultiplier = 1.0;
 		let hasPulsatingBuff = false;
 		let pulseStrength = 0;
-		const now = Date.now();
 
 		// During manual control, reduce buff intensity for smoother control
 		const manualReduction = isManual ? 0.3 : 1.0; // 30% strength when manual
@@ -229,31 +334,12 @@ class Particle {
 			radiusMult *
 			radiusMult *
 			buffRadiusMultiplier *
-			buffRadiusMultiplier;
+			buffRadiusMultiplier *
+			cursorFadeIn * // Apply fade-in to radius
+			cursorFadeIn;
 
-		// Anticipation - particles sense fast-moving cursor
-		const awarenessRadiusSq =
-			(this.awareness + Math.sqrt(dynamicRadiusSq)) ** 2;
-		if (distSq < awarenessRadiusSq && dist > Math.sqrt(dynamicRadiusSq)) {
-			const cursorSpeed = Math.sqrt(cursorVx * cursorVx + cursorVy * cursorVy);
-			if (cursorSpeed > 1.5) {
-				const cursorDirX = cursorVx / cursorSpeed;
-				const cursorDirY = cursorVy / cursorSpeed;
-				const toParticleX = -dx / dist;
-				const toParticleY = -dy / dist;
-				const alignmentDot =
-					cursorDirX * toParticleX + cursorDirY * toParticleY;
-
-				if (alignmentDot > 0.4) {
-					const anticipationForce = alignmentDot * 0.2 * this.nervousness * buffForceMultiplier;
-					this.vx -= anticipationForce * cursorDirX;
-					this.vy -= anticipationForce * cursorDirY;
-				}
-			}
-		}
-
-		// Cursor repulsion with spiral
-		if (distSq < dynamicRadiusSq) {
+		// Cursor repulsion with spiral (only when cursor is active)
+		if (cursorActive && distSq < dynamicRadiusSq) {
 			const safeDist = Math.max(distSq, 1);
 			const baseForce =
 				(-dynamicRadiusSq / safeDist) * CONFIG.REPULSION_STRENGTH * buffForceMultiplier;
@@ -270,8 +356,8 @@ class Particle {
 			this.vy += spiralForce * Math.sin(tangentialAngle);
 		}
 
-		// Pulsating wave effect for cursor buffs - simple symmetric effect
-		if (hasPulsatingBuff) {
+		// Pulsating wave effect for cursor buffs - simple symmetric effect (only when cursor is active)
+		if (cursorActive && hasPulsatingBuff) {
 			const particleSpacing = isMobile ? CONFIG.SPACING_MOBILE : CONFIG.SPACING_DESKTOP;
 			const waveDistance = particleSpacing * 4;
 			const waveRadius = Math.sqrt(dynamicRadiusSq) + waveDistance;
@@ -297,23 +383,23 @@ class Particle {
 			const oDistSq = odx * odx + ody * ody;
 			const oDist = Math.sqrt(oDistSq);
 
-			// Subtle organic growth variation (not heavy breathing)
+			// Subtle organic growth variation (reduced for smoother feel)
 			const morphPulse =
-				Math.sin(o.frame * 0.05) * 0.05 +
-				Math.sin(o.frame * 0.02 + this.angle * 2) * 0.04 +
+				Math.sin(o.frame * 0.05) * 0.03 +
+				Math.sin(o.frame * 0.02 + this.angle * 2) * 0.02 +
 				1.0;
 
-			// Asymmetric tentacle-like directional variations
+			// Asymmetric tentacle-like directional variations (reduced)
 			const angleToParticle = Math.atan2(ody, odx);
 			const tentacleVariation =
-				Math.sin(angleToParticle * 3 + o.frame * 0.03) * 0.08 +
-				Math.cos(angleToParticle * 5 - o.frame * 0.04) * 0.06;
+				Math.sin(angleToParticle * 3 + o.frame * 0.03) * 0.05 +
+				Math.cos(angleToParticle * 5 - o.frame * 0.04) * 0.04;
 
 			const organicRadius = o.radius * morphPulse * (1.0 + tentacleVariation);
 			const currentRadiusSq = organicRadius ** 2;
 
-			if (o.frame < 360) {
-				// Push phase - growing organism expanding (longer: 360 frames = 6 seconds)
+			if (o.frame < 240) {
+				// Push phase - growing organism expanding (240 frames = 4 seconds, shorter for more playable time)
 				const edgeThickness = 18;
 				const innerRadiusSq = Math.max(0, organicRadius - edgeThickness) ** 2;
 
@@ -327,7 +413,7 @@ class Particle {
 				}
 			} else {
 				// Pull phase - death black hole effect with slow, continuous growth
-				const pullAge = o.frame - 360;
+				const pullAge = o.frame - 240;
 
 				// Very slow progression - takes 30 seconds to reach initial full power
 				const initialProgress = Math.min(pullAge / 1800, 1.0);
@@ -335,7 +421,7 @@ class Particle {
 				// Then continues growing much more slowly over 90 seconds total
 				const continuousGrowth = Math.min(pullAge / 5400, 1.2); // Up to 1.2x over 90 seconds
 
-				// Pull radius grows from 50% to 200%, then up to 320% over 90 seconds
+				// Pull radius grows from 50% to 250%, then up to ~400% over 90 seconds
 				const baseMultiplier =
 					CONFIG.OUTBREAK_PULL_RADIUS_MIN +
 					(CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) *
@@ -345,6 +431,7 @@ class Particle {
 				const pullRadiusSq = pullRadius * pullRadius;
 
 				if (oDistSq < pullRadiusSq) {
+					// No continuous consumption - black holes only remove particles when defeated
 					// Very slow strength ramp-up, then continues growing
 					let pullStrength = Math.min(pullAge / 1200, 1.0) * 1.2; // Takes 20 seconds to reach base strength
 					pullStrength *= 1.0 + continuousGrowth * 0.3; // Continues growing stronger more slowly
@@ -364,7 +451,7 @@ class Particle {
 			}
 		}
 
-		// Energy stations - arrange particles into a space invader style emblem
+		// Energy stations - create geometric grid patterns
 		// Only apply forces if stations exist and this is an active particle
 		if (stations.length > 0 && this.active) {
 			for (let i = 0; i < stations.length; i++) {
@@ -372,135 +459,76 @@ class Particle {
 				const sdx = this.x - s.x;
 				const sdy = this.y - s.y;
 				const sDistSq = sdx * sdx + sdy * sdy;
+				const sDist = Math.sqrt(sDistSq);
 
-				// Emblem shrinks over time as it approaches capture-ready state
+				// Compact grid pattern for clean geometric aesthetic
 				const age = Date.now() - s.spawnTime;
-				const lifeRatio = 1.0 - age / CONFIG.STATION_LIFETIME;
-				const sizeScale = 0.4 + lifeRatio * 0.6;
-
-				const baseSize = 32; // Base size for the emblem
-				const pixelSize = (baseSize * sizeScale) / 8; // Grid unit size
-				const halfWidth = 4 * pixelSize;
-				const pullRadius = halfWidth * 1.5;
+				const gridRadius = 35; // Fixed small size - looks clean in the particle battle
 
 				// Early exit if too far
-				if (Math.abs(sdx) > pullRadius || Math.abs(sdy) > pullRadius) continue;
+				if (sDist > gridRadius * 1.2) continue;
 
-				// Space invader pixel art pattern (8x8 grid, symmetric)
-				// Define horizontal line segments for each row
-				// Format: [y_offset, x_start, x_end] in grid units
-				const pattern = [
-					// Top antenna
-					[-3.5, -1, 1],
-					// Head
-					[-2.5, -2, 2],
-					[-1.5, -3, 3],
-					// Body with notches
-					[-0.5, -3, -2],
-					[-0.5, -1, 1],
-					[-0.5, 2, 3],
-					[0.5, -3, 3],
-					// Legs
-					[1.5, -3, -2],
-					[1.5, 2, 3],
-					[2.5, -2, -1],
-					[2.5, 1, 2],
-				];
+				// Snap particles to grid positions for blocky effect
+				const gridSpacing = isMobile ? CONFIG.SPACING_MOBILE * 2 : CONFIG.SPACING_DESKTOP * 2;
 
-				let closestDist = Infinity;
-				let closestSegment = null;
+				// Calculate target grid position relative to station
+				const localX = sdx;
+				const localY = sdy;
+				const gridX = Math.round(localX / gridSpacing) * gridSpacing;
+				const gridY = Math.round(localY / gridSpacing) * gridSpacing;
+				const targetX = s.x + gridX;
+				const targetY = s.y + gridY;
 
-				// Find closest line segment
-				for (const seg of pattern) {
-					const rowY = s.y + seg[0] * pixelSize;
-					const segStartX = s.x + seg[1] * pixelSize;
-					const segEndX = s.x + seg[2] * pixelSize;
+				// Distance to nearest grid point
+				const gridDx = targetX - this.x;
+				const gridDy = targetY - this.y;
+				const gridDistSq = gridDx * gridDx + gridDy * gridDy;
+				const gridDist = Math.sqrt(gridDistSq);
 
-					// Distance to horizontal line segment
-					const distToRow = Math.abs(this.y - rowY);
+				// Only snap if within station radius
+				const targetDist = Math.sqrt(gridX * gridX + gridY * gridY);
+				if (targetDist < gridRadius && gridDist < gridSpacing * 0.6) {
+					// Pull toward grid point - creates structured pattern
+					const snapStrength = (1.0 - gridDist / (gridSpacing * 0.6)) * 2.5;
 
-					// Check if horizontally within segment
-					if (this.x >= segStartX && this.x <= segEndX) {
-						if (distToRow < closestDist) {
-							closestDist = distToRow;
-							closestSegment = {
-								type: "h",
-								y: rowY,
-								x1: segStartX,
-								x2: segEndX,
-							};
-						}
-					} else {
-						// Distance to segment endpoints
-						const distToStart = Math.sqrt(
-							(this.x - segStartX) ** 2 + (this.y - rowY) ** 2,
-						);
-						const distToEnd = Math.sqrt(
-							(this.x - segEndX) ** 2 + (this.y - rowY) ** 2,
-						);
-						const endDist = Math.min(distToStart, distToEnd);
-
-						if (endDist < closestDist) {
-							closestDist = endDist;
-							const targetX = distToStart < distToEnd ? segStartX : segEndX;
-							closestSegment = { type: "p", x: targetX, y: rowY };
-						}
-					}
+					this.vx += gridDx * snapStrength * 0.15;
+					this.vy += gridDy * snapStrength * 0.15;
 				}
 
-				// Pull particles to closest segment
-				if (closestSegment && closestDist < pixelSize * 2) {
-					const strength = (1.0 - closestDist / (pixelSize * 2)) * 3.5;
+				// Create animated geometric patterns based on station age
+				const patternTime = age * 0.002; // Slow animation
 
-					if (closestSegment.type === "h") {
-						// Pull to horizontal line
-						const dy = closestSegment.y - this.y;
-						this.vy += dy * strength * 0.6;
-					} else {
-						// Pull to point
-						const dx = closestSegment.x - this.x;
-						const dy = closestSegment.y - this.y;
-						this.vx += dx * strength * 0.5;
-						this.vy += dy * strength * 0.6;
-					}
+				// Concentric square pulses
+				const squareLevel = Math.floor(sDist / (gridSpacing * 2));
+				const squarePulse = Math.sin(patternTime - squareLevel * 0.5) * 0.5 + 0.5;
+
+				// Add subtle pulsing force to create wave effect through the grid
+				if (squarePulse > 0.6 && sDist > gridSpacing * 2) {
+					const pulseStrength = (squarePulse - 0.6) * 2.5;
+					const angle = Math.atan2(sdy, sdx);
+					this.vx += Math.cos(angle) * pulseStrength * 0.3;
+					this.vy += Math.sin(angle) * pulseStrength * 0.3;
 				}
 
-				// Station ripple waves - slow charging pull, then burst push
+				// Station ripple waves - static rotating ring formation
 				for (let r = 0; r < s.ripples.length; r++) {
 					const ripple = s.ripples[r];
 					const rippleDist = Math.sqrt(sDistSq);
 
-					// Large affected area with smooth falloff
-					const waveThickness = 200; // Very large - affects many particles
+					// Narrow ring for static formation
+					const waveThickness = 40; // Thin ring to keep particles in formation
 					const distFromWave = Math.abs(rippleDist - ripple.radius);
 
 					if (distFromWave < waveThickness) {
 						const proximityFactor = 1.0 - (distFromWave / waveThickness);
 
-						let force, angle;
-						if (ripple.isCharging) {
-							// CHARGING: Gentle pull toward station + orbital rotation for visible ring
-							const radialAngle = Math.atan2(-sdy, -sdx); // Point toward station
-							const radialForce = 12.0 * proximityFactor * ripple.alpha;
+						// Only apply orbital force - particles rotate in place without being pulled in
+						const tangentialAngle = Math.atan2(-sdy, -sdx) + Math.PI / 2; // Perpendicular for clockwise orbit
+						const orbitalForce = 6.0 * proximityFactor * ripple.alpha;
 
-							// Add tangential (orbital) force to create rotating ring
-							const tangentialAngle = radialAngle + Math.PI / 2; // Perpendicular for clockwise orbit
-							const orbitalForce = 8.0 * proximityFactor * ripple.alpha;
-
-							// Apply both radial and orbital forces
-							this.vx += radialForce * Math.cos(radialAngle) + orbitalForce * Math.cos(tangentialAngle);
-							this.vy += radialForce * Math.sin(radialAngle) + orbitalForce * Math.sin(tangentialAngle);
-						} else {
-							// BURST: Spectacular radial explosion outward from station
-							angle = Math.atan2(sdy, sdx); // Point away from station
-							// Add slight random variation for more organic burst
-							const variation = (Math.random() - 0.5) * 0.3;
-							angle += variation;
-							force = 60.0 * proximityFactor * ripple.alpha; // Much stronger burst
-
-							this.vx += force * Math.cos(angle);
-							this.vy += force * Math.sin(angle);
-						}
+						// Apply only orbital force to maintain static ring
+						this.vx += orbitalForce * Math.cos(tangentialAngle);
+						this.vy += orbitalForce * Math.sin(tangentialAngle);
 					}
 				}
 			}
@@ -560,8 +588,50 @@ class Particle {
 
 		this.vx *= CONFIG.PARTICLE_DRAG;
 		this.vy *= CONFIG.PARTICLE_DRAG;
+
+		// Apply spring-back force to return to home position
 		this.x += this.vx + (this.ox - this.x) * CONFIG.PARTICLE_EASE;
 		this.y += this.vy + (this.oy - this.y) * CONFIG.PARTICLE_EASE;
+	}
+}
+
+// ============================================================================
+// PARTICLE SPAWNING
+// ============================================================================
+/**
+ * Spawn new particles dynamically at a given location
+ * @param {number} x - X coordinate
+ * @param {number} y - Y coordinate
+ * @param {number} count - Number of particles to spawn
+ * @param {number} spreadRadius - Radius to spread particles around the point
+ * @param {number} burstVelocity - Initial outward velocity (optional)
+ */
+function spawnParticles(x, y, count, spreadRadius = 0, burstVelocity = 0) {
+	// Cap spawning at initial particle count
+	const maxToSpawn = initialParticleCount > 0 ? Math.max(0, initialParticleCount - list.length) : count;
+	const actualCount = Math.min(count, maxToSpawn);
+
+	for (let i = 0; i < actualCount; i++) {
+		// Random position within spread radius
+		const angle = Math.random() * Math.PI * 2;
+		const distance = Math.random() * spreadRadius;
+		const px = x + Math.cos(angle) * distance;
+		const py = y + Math.sin(angle) * distance;
+
+		// Create particle with spawn position as home
+		const particle = new Particle(px, py, centerX, centerY);
+
+		// Set active state to match current growth phase
+		particle.active = true;
+		particle.fadeAlpha = 0.0; // Spawned particles fade in gradually (prevents pop-in)
+
+		// Optional burst velocity
+		if (burstVelocity > 0) {
+			particle.vx = Math.cos(angle) * burstVelocity;
+			particle.vy = Math.sin(angle) * burstVelocity;
+		}
+
+		list.push(particle);
 	}
 }
 
@@ -573,6 +643,9 @@ function updateCursor(deltaTime) {
 	const now = Date.now();
 	const speedProgress = Math.min(elapsed / CONFIG.CURSOR_SPEED_DURATION, 1);
 
+	// Delay cursor entry for random 10-13 seconds - let particles grow first
+	const cursorActive = elapsed >= cursorDelay;
+
 	// Check if any black hole is large enough to affect 70% of screen
 	const screenDiagonal = Math.sqrt(w * w + h * h);
 	const requiredCoverage = screenDiagonal * 0.7;
@@ -580,9 +653,9 @@ function updateCursor(deltaTime) {
 
 	for (let i = 0; i < outbreaks.length; i++) {
 		const o = outbreaks[i];
-		if (o.frame < 360) continue; // Only pull phase
+		if (o.frame < 240) continue; // Only pull phase
 
-		const pullAge = o.frame - 360;
+		const pullAge = o.frame - 240;
 		const initialProgress = Math.min(pullAge / 1800, 1.0);
 		const continuousGrowth = Math.min(pullAge / 5400, 1.2);
 		const baseMultiplier =
@@ -809,14 +882,14 @@ function updateCursor(deltaTime) {
 	// Radius scales with active particles - much smaller in late game for precision
 	let particleScaling;
 	if (activeParticleRatio < 0.4) {
-		// Early game: grows slightly
-		const maxScaling = isMobile ? 0.25 : 0.3;
+		// Early game: grows slightly - smaller on mobile for better control
+		const maxScaling = isMobile ? 0.15 : 0.3; // Reduced from 0.25 for mobile
 		particleScaling = 1.0 + (activeParticleRatio / 0.4) * maxScaling;
 	} else {
 		// Late game: shrinks significantly for more precision
-		const maxScaling = isMobile ? 0.25 : 0.3;
+		const maxScaling = isMobile ? 0.15 : 0.3; // Reduced from 0.25 for mobile
 		const shrinkFactor = (activeParticleRatio - 0.4) / 0.6; // 0 to 1 as we go from 40% to 100%
-		particleScaling = 1.0 + maxScaling - shrinkFactor * 0.65; // Shrink from 1.25-1.3 to 0.6-0.65
+		particleScaling = 1.0 + maxScaling - shrinkFactor * 0.6; // Shrink from 1.15-1.3 to 0.55-0.7
 	}
 
 	// Visual feedback during disruption - cursor grows when charged
@@ -827,8 +900,8 @@ function updateCursor(deltaTime) {
 	// Dynamic radius pulsing - less dramatic on mobile, more movement-focused
 	const basePulseMagnitude = isMobile
 		? activeParticleRatio > 0.7
-			? 0.15
-			: 0.08 // Smaller pulses on mobile
+			? 0.12 // Reduced from 0.15
+			: 0.06 // Reduced from 0.08
 		: activeParticleRatio > 0.7
 			? 0.4
 			: 0.18; // Dramatic pulses on desktop
@@ -962,14 +1035,14 @@ function updateCursor(deltaTime) {
 
 		for (let i = 0; i < outbreaks.length; i++) {
 			const o = outbreaks[i];
-			if (o.frame < 360) continue; // Only pull phase
+			if (o.frame < 240) continue; // Only pull phase
 
 			const dx = o.x - cursorX;
 			const dy = o.y - cursorY;
 			const dist = Math.sqrt(dx * dx + dy * dy);
 
 			// Calculate pull radius (same as particle system)
-			const pullAge = o.frame - 360;
+			const pullAge = o.frame - 240;
 			const initialProgress = Math.min(pullAge / 1200, 1.0);
 			const continuousGrowth = Math.min(pullAge / 3600, 1.5);
 			const baseMultiplier =
@@ -993,8 +1066,11 @@ function updateCursor(deltaTime) {
 			}
 		}
 
-		cursorX += cursorVx;
-		cursorY += cursorVy;
+		// Only move cursor after delay
+		if (cursorActive) {
+			cursorX += cursorVx;
+			cursorY += cursorVy;
+		}
 	} else {
 		// Manual control
 		const dx = targetX - cursorX;
@@ -1031,14 +1107,14 @@ function updateCursor(deltaTime) {
 
 		for (let i = 0; i < outbreaks.length; i++) {
 			const o = outbreaks[i];
-			if (o.frame < 360) continue; // Only pull phase
+			if (o.frame < 240) continue; // Only pull phase
 
 			const dx = o.x - cursorX;
 			const dy = o.y - cursorY;
 			const dist = Math.sqrt(dx * dx + dy * dy);
 
 			// Calculate pull radius (same as particle system)
-			const pullAge = o.frame - 360;
+			const pullAge = o.frame - 240;
 			const initialProgress = Math.min(pullAge / 1200, 1.0);
 			const continuousGrowth = Math.min(pullAge / 3600, 1.5);
 			const baseMultiplier =
@@ -1062,12 +1138,17 @@ function updateCursor(deltaTime) {
 			}
 		}
 
-		cursorX += cursorVx;
-		cursorY += cursorVy;
+		// Only move cursor after delay
+		if (cursorActive) {
+			cursorX += cursorVx;
+			cursorY += cursorVy;
+		}
 
 		const targetRadius = particleScaling * (1.0 + radiusPulse);
 		radiusMultiplier += (targetRadius - radiusMultiplier) * 0.1;
 	}
+
+	// Cursor no longer spawns particles - only energy stations heal the field
 }
 
 // ============================================================================
@@ -1075,41 +1156,82 @@ function updateCursor(deltaTime) {
 // ============================================================================
 function updateGrowth() {
 	const elapsed = Date.now() - startTime;
+	const time = elapsed * 0.001;
+	const spacing = isMobile ? CONFIG.SPACING_MOBILE : CONFIG.SPACING_DESKTOP;
+	const fadeDistance = spacing * 3; // 3 particle spacings for smooth fade
+
+	let activeCount = 0;
 	const progress = Math.min(elapsed / CONFIG.GROWTH_DURATION, 1);
 
 	let radiusProgress;
 	if (progress < 0.6) {
-		// First phase: grow from 8% to 68% (0-60% of duration, quicker than before)
+		// First phase: grow from start to 68% (0-60% of duration)
 		const growthProgress = progress / 0.6;
 		const easedProgress = 1 - Math.pow(1 - growthProgress, 3);
 		radiusProgress =
 			CONFIG.GROWTH_START_RADIUS +
 			easedProgress * (0.68 - CONFIG.GROWTH_START_RADIUS);
 	} else {
-		// Second phase: fluctuate between 55% and 70%
-		const fluctuatePhase = (elapsed - CONFIG.GROWTH_DURATION * 0.6) * 0.0003; // Slow oscillation
+		// Second phase: very subtle breathing effect (67-69% range)
+		const fluctuatePhase = (elapsed - CONFIG.GROWTH_DURATION * 0.6) * 0.0001; // Much slower
 		const wave = Math.sin(fluctuatePhase) * 0.5 + 0.5; // 0 to 1
-		radiusProgress = 0.55 + wave * 0.15; // Fluctuate between 55% and 70%
+		radiusProgress = 0.67 + wave * 0.02; // Subtle 2% fluctuation instead of 15%
 	}
 
 	const baseThreshold = maxParticleDistance * radiusProgress;
 
-	// Organic growth with sine waves for virus-like asymmetry
-	const time = elapsed * 0.001;
+	// Blend between blocky (early game) and smooth (late game) edges
+	// Early game: blocky "hacker" aesthetic, Late game: smooth organic fade
+	const smoothBlend = Math.min(progress * 2.0, 1.0); // 0 at start, 1.0 at 50% progress
 
-	let activeCount = 0;
+	// Organic growth with sine waves for virus-like asymmetry (reduced slightly)
 	for (let i = 0; i < list.length; i++) {
 		const p = list[i];
 
 		const directionalGrowth =
-			Math.sin(p.angle * 3 + time * 0.5) * 0.15 +
-			Math.sin(p.angle * 5 - time * 0.8) * 0.1 +
-			Math.sin(p.angle * 7 + time * 1.2) * 0.08 +
-			Math.sin(time * 2.0 + p.angle) * 0.12;
+			Math.sin(p.angle * 3 + time * 0.5) * 0.12 +
+			Math.sin(p.angle * 5 - time * 0.8) * 0.08 +
+			Math.sin(p.angle * 7 + time * 1.2) * 0.06 +
+			Math.sin(time * 2.0 + p.angle) * 0.09;
 
 		const threshold = baseThreshold * (1 + directionalGrowth + p.growthOffset);
-		p.active = p.distFromCenter <= threshold;
-		if (p.active) activeCount++;
+
+		// Calculate how far particle is from threshold (positive = inside, negative = outside)
+		const distanceFromThreshold = threshold - p.distFromCenter;
+
+		// Blend between blocky and smooth based on game progress
+		if (smoothBlend < 0.1) {
+			// Early game: Pure blocky (binary on/off)
+			if (distanceFromThreshold > 0) {
+				p.fadeAlpha = 1.0;
+				p.active = true;
+			} else {
+				p.fadeAlpha = 0.0;
+				p.active = false;
+			}
+		} else {
+			// Transition to smooth fade
+			const effectiveFadeDistance = fadeDistance * smoothBlend; // Shrink fade zone when blocky
+
+			if (distanceFromThreshold > effectiveFadeDistance) {
+				// Well inside - fully visible
+				p.fadeAlpha = 1.0;
+				p.active = true;
+			} else if (distanceFromThreshold < -effectiveFadeDistance) {
+				// Well outside - invisible
+				p.fadeAlpha = 0.0;
+				p.active = false;
+			} else {
+				// In fade zone - smoothly transition
+				p.active = true; // Keep active during fade
+				// Smooth ease curve: 0 at -fadeDistance, 1 at +fadeDistance
+				const fadeProgress = (distanceFromThreshold + effectiveFadeDistance) / (effectiveFadeDistance * 2);
+				// Ease-in-out for smoother transition
+				p.fadeAlpha = fadeProgress * fadeProgress * (3.0 - 2.0 * fadeProgress);
+			}
+		}
+
+		if (p.fadeAlpha > 0.1) activeCount++; // Count if mostly visible
 	}
 
 	activeParticleRatio = activeCount / list.length;
@@ -1279,20 +1401,20 @@ function updateOutbreaks() {
 				stationBonus *= 2.5; // 2.5x damage multiplier
 			}
 
-			// Disruption mode: damage boost when hunting targets
+			// Disruption mode: DRAMATIC damage boost for comebacks
 			let disruptionBonus = 1.0;
 			if (disruptionIntensity > 0.3) {
 				// Base disruption damage scales with how desperate the situation is
 				const blackHoleDominance = 1.0 - activeParticleRatio;
-				const desperation = Math.max(1.0, 1.0 + blackHoleDominance * 3.0); // 1x to 4x based on dominance
+				const desperation = Math.max(1.0, 1.0 + blackHoleDominance * 5.0); // 1x to 6x based on dominance
 
-				disruptionBonus = desperation * (1.0 + disruptionIntensity * 2.0); // Up to 12x when desperate
+				disruptionBonus = desperation * (1.0 + disruptionIntensity * 2.0); // Up to 18x when desperate
 
-				// Extra bonus if this is the actual target
+				// Extra bonus if this is the actual target - MASSIVE damage!
 				if (disruptionTarget === o) {
-					disruptionBonus *= 1.5; // Up to 18x damage to primary target when desperate
+					disruptionBonus *= 1.5; // Up to 27x damage to primary target when desperate
 				} else if (disruptionSecondaryTarget === o) {
-					disruptionBonus *= 1.3; // Up to 15.6x damage to secondary target
+					disruptionBonus *= 1.3; // Up to 23.4x damage to secondary target
 				}
 
 				// Collision damage: bonus if two marked viruses are close
@@ -1320,10 +1442,42 @@ function updateOutbreaks() {
 
 		if (o.health <= 0) {
 			// Black hole destroyed! Grant temporary boost
-			if (o.frame >= 360) {
+			if (o.frame >= 240) {
 				const now = Date.now();
 				cursorBuffs.blackHoleKillBoostActive = true;
 				cursorBuffs.blackHoleKillBoostEndTime = now + 8000; // 8 seconds
+
+				// ONE-TIME particle consumption from the black ring area
+				// Remove shocked particles in the dark ring (50-70% of pull radius)
+				const pullAge = o.frame - 240;
+				const initialProgress = Math.min(pullAge / 1800, 1.0);
+				const continuousGrowth = Math.min(pullAge / 5400, 1.2);
+				const baseMultiplier = CONFIG.OUTBREAK_PULL_RADIUS_MIN + (CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) * initialProgress;
+				const pullRadiusMultiplier = baseMultiplier + continuousGrowth * 1.67;
+
+				// Calculate organic radius with morphing
+				const morphPulse = Math.sin(o.frame * 0.03) * 0.08 + Math.sin(o.frame * 0.05) * 0.03 + Math.sin(o.frame * 0.02) * 0.02 + 1.0;
+				const organicRadius = o.radius * morphPulse;
+				const pullRadius = organicRadius * pullRadiusMultiplier;
+
+				// Black ring area: 50% to 70% of pull radius (where darkness is strongest)
+				const blackRingInner = pullRadius * 0.5;
+				const blackRingOuter = pullRadius * 0.7;
+				const blackRingInnerSq = blackRingInner * blackRingInner;
+				const blackRingOuterSq = blackRingOuter * blackRingOuter;
+
+				// Remove shocked particles in the black ring
+				for (let i = list.length - 1; i >= 0; i--) {
+					const p = list[i];
+					const dx = p.x - o.x;
+					const dy = p.y - o.y;
+					const distSq = dx * dx + dy * dy;
+
+					// Check if particle is in black ring AND currently shocked
+					if (distSq > blackRingInnerSq && distSq < blackRingOuterSq && p.shockDisabledUntil > now) {
+						p.consumed = true;
+					}
+				}
 			}
 			return false;
 		}
@@ -1470,11 +1624,11 @@ function updateOutbreaks() {
 		o.x += o.vx;
 		o.y += o.vy;
 
-		// Organic growth morphing (subtle, continuous)
+		// Organic growth morphing (reduced for smoother feel)
 		const morphVariation =
-			Math.sin(o.frame * 0.03) * 0.06 +
-			Math.sin(o.frame * 0.07) * 0.05 +
-			Math.cos(o.frame * 0.02) * 0.04;
+			Math.sin(o.frame * 0.03) * 0.04 +
+			Math.sin(o.frame * 0.07) * 0.03 +
+			Math.cos(o.frame * 0.02) * 0.02;
 
 		// Growth rate increases with game progress
 		const elapsed = Date.now() - startTime;
@@ -1526,8 +1680,100 @@ function updateOutbreaks() {
 			o.maxed = true;
 		}
 
+		// SHOCK WAVE: Disabled - cursor spawns particles instead
+		// if (o.frame >= 240) {
+		// 	const pullAge = o.frame - 240;
+		// 	const initialProgress = Math.min(pullAge / 1800, 1.0);
+		//
+		// 	// Only trigger if black hole is large enough (>50% through initial growth)
+		// 	if (initialProgress > 0.5) {
+		// 		const now = Date.now();
+		// 		const cooldown = isMobile
+		// 			? CONFIG.SHOCK_WAVE_COOLDOWN_MOBILE
+		// 			: CONFIG.SHOCK_WAVE_COOLDOWN;
+		//
+		// 		// Check if we can trigger a shock wave
+		// 		if (now >= nextShockWaveTime) {
+		// 			// Trigger shock wave from this black hole
+		// 			shockWaves.push({
+		// 				x: o.x,
+		// 				y: o.y,
+		// 				radius: 0,
+		// 				spawnTime: now,
+		// 			});
+		// 			nextShockWaveTime = now + cooldown;
+		// 		}
+		// 	}
+		// }
+
 		// Keep viruses alive - only remove when killed
 		return true;
+	});
+}
+
+// ============================================================================
+// SHOCK WAVE SYSTEM
+// ============================================================================
+function updateShockWaves() {
+	const now = Date.now();
+
+	// Update all active shock waves
+	shockWaves = shockWaves.filter(sw => {
+		const age = now - sw.spawnTime;
+
+		// Store previous radius to detect newly hit particles
+		const prevRadius = sw.radius;
+		sw.radius += CONFIG.SHOCK_WAVE_EXPANSION_SPEED;
+
+		// Spawn particles at the wave edge (creates visible expanding ring effect)
+		// Only spawn every ~50px of radius growth to avoid performance issues
+		// Only spawn if below initial particle count
+		if ((!sw.lastSpawnRadius || sw.radius - sw.lastSpawnRadius > 50) && list.length < initialParticleCount) {
+			const spacing = isMobile ? CONFIG.SPACING_MOBILE : CONFIG.SPACING_DESKTOP;
+			const particleCount = Math.floor(15 / spacing); // Fewer particles than energy stations
+			const maxToSpawn = Math.max(0, initialParticleCount - list.length);
+			const circleRadius = sw.radius + CONFIG.SHOCK_WAVE_THICKNESS / 2; // Middle of wave
+
+			// Spawn particles in a ring pattern
+			for (let i = 0; i < Math.min(particleCount, maxToSpawn); i++) {
+				const angle = (i / particleCount) * Math.PI * 2;
+				const px = sw.x + Math.cos(angle) * circleRadius;
+				const py = sw.y + Math.sin(angle) * circleRadius;
+				const particle = new Particle(px, py, centerX, centerY);
+				particle.active = true;
+				// Give slight outward velocity
+				particle.vx = Math.cos(angle) * 1.5;
+				particle.vy = Math.sin(angle) * 1.5;
+				list.push(particle);
+			}
+
+			sw.lastSpawnRadius = sw.radius;
+		}
+
+		// Disable particles hit by the expanding wave
+		const innerRadius = prevRadius;
+		const outerRadius = sw.radius + CONFIG.SHOCK_WAVE_THICKNESS;
+
+		for (let i = 0; i < list.length; i++) {
+			const p = list[i];
+			if (!p.active) continue;
+
+			// Skip if particle is already disabled by a shock wave
+			if (p.shockDisabledUntil > now) continue;
+
+			const dx = p.x - sw.x;
+			const dy = p.y - sw.y;
+			const dist = Math.sqrt(dx * dx + dy * dy);
+
+			// Check if particle is within the expanding wave ring
+			if (dist >= innerRadius && dist < outerRadius) {
+				// Disable this particle
+				p.shockDisabledUntil = now + CONFIG.SHOCK_WAVE_PARTICLE_DISABLE_DURATION;
+			}
+		}
+
+		// Remove wave after lifetime
+		return age < CONFIG.SHOCK_WAVE_LIFETIME;
 	});
 }
 
@@ -1756,16 +2002,16 @@ function updateAnomalies() {
 				stationBonus *= 2.5; // 2.5x damage multiplier
 			}
 
-			// Disruption mode damage boost
+			// Disruption mode damage boost - DRAMATIC for comebacks
 			let disruptionBonus = 1.0;
 			if (disruptionIntensity > 0.3) {
 				// Base disruption damage scales with how desperate the situation is
 				const blackHoleDominance = 1.0 - activeParticleRatio;
-				const desperation = Math.max(1.0, 1.0 + blackHoleDominance * 3.0); // 1x to 4x based on dominance
+				const desperation = Math.max(1.0, 1.0 + blackHoleDominance * 5.0); // 1x to 6x based on dominance
 
-				disruptionBonus = desperation * (1.0 + disruptionIntensity * 2.0); // Up to 12x when desperate
+				disruptionBonus = desperation * (1.0 + disruptionIntensity * 2.0); // Up to 18x when desperate
 				if (disruptionTarget === a) {
-					disruptionBonus *= 1.5; // Up to 18x damage to marked anomaly when desperate
+					disruptionBonus *= 1.5; // Up to 27x damage to marked anomaly when desperate
 				}
 			}
 
@@ -1789,15 +2035,40 @@ function updateStations() {
 		activeParticleRatio > 0.25 &&
 		stations.length < 2
 	) {
-		const angle = Math.random() * Math.PI * 2;
-		const distance = (0.25 + Math.random() * 0.25) * Math.min(w, h);
+		let stationX, stationY;
+
+		// Find active black holes that are consuming particles
+		const consumingBlackHoles = outbreaks.filter(o => {
+			const pullAge = o.frame - 240;
+			return o.frame >= 240 && pullAge > 1200; // In pull phase and consuming
+		});
+
+		// 60% chance to spawn inside a black hole if any exist
+		if (consumingBlackHoles.length > 0 && Math.random() < 0.6) {
+			// Pick a random consuming black hole
+			const targetBlackHole = consumingBlackHoles[Math.floor(Math.random() * consumingBlackHoles.length)];
+
+			// Spawn near the center of the black hole (within 40% of radius)
+			const spawnAngle = Math.random() * Math.PI * 2;
+			const spawnDist = Math.random() * targetBlackHole.radius * 0.4;
+
+			stationX = targetBlackHole.x + Math.cos(spawnAngle) * spawnDist;
+			stationY = targetBlackHole.y + Math.sin(spawnAngle) * spawnDist;
+		} else {
+			// Normal spawn: random position around center
+			const angle = Math.random() * Math.PI * 2;
+			const distance = (0.25 + Math.random() * 0.25) * Math.min(w, h);
+
+			stationX = centerX + Math.cos(angle) * distance;
+			stationY = centerY + Math.sin(angle) * distance;
+		}
 
 		// Random drift direction
 		const driftAngle = Math.random() * Math.PI * 2;
 
 		stations.push({
-			x: centerX + Math.cos(angle) * distance,
-			y: centerY + Math.sin(angle) * distance,
+			x: stationX,
+			y: stationY,
 			driftAngle: driftAngle,
 			frame: 0,
 			spawnTime: now,
@@ -1832,41 +2103,44 @@ function updateStations() {
 			s.driftAngle = -s.driftAngle;
 		}
 
-		// Update ripples - slow charging cycle with burst
-		const lifeRatio = 1.0 - age / CONFIG.STATION_LIFETIME;
-		s.ripples = s.ripples.filter((ripple) => {
-			const rippleAge = now - ripple.birthTime;
-			const rippleLifespan = 15000; // 15 second cycle (slower)
-			const ripplePhase = rippleAge / rippleLifespan;
+		// Static ring formation - no expansion or fading
+		// Only create one ring per station at a fixed radius
+		if (s.ripples.length === 0) {
+			s.ripples.push({
+				radius: 80, // Fixed radius for static formation
+				alpha: 1.0, // Always visible
+				birthTime: now,
+				lastParticleSpawn: 0,
+			});
+		}
 
-			// Charging phase (0-80%): Slow expansion, pulling particles in
-			// Burst phase (80-100%): Fast expansion, pushing particles out
-			if (ripplePhase < 0.80) {
-				// Charging: expand slowly
-				ripple.radius += 1.2;
-				ripple.isCharging = true;
-			} else {
-				// Burst: expand quickly
-				ripple.radius += 6.0;
-				ripple.isCharging = false;
+		// Update the single static ring
+		const ripple = s.ripples[0];
+
+		// Spawn particles more frequently to help rebuild field
+		// Only spawn if below initial particle count (don't over-populate)
+		if ((!ripple.lastParticleSpawn || now - ripple.lastParticleSpawn > 800) && list.length < initialParticleCount) {
+			const spacing = isMobile ? CONFIG.SPACING_MOBILE : CONFIG.SPACING_DESKTOP;
+			// Spawn more particles for better field regeneration
+			const baseParticles = isMobile ? 10 : 8;
+			const particleCount = Math.floor(baseParticles / spacing);
+			const maxToSpawn = Math.max(0, initialParticleCount - list.length);
+
+			// Spawn particles at the ring radius so they join the rotation naturally
+			for (let i = 0; i < Math.min(particleCount, maxToSpawn); i++) {
+				const angle = (Math.random() * Math.PI * 2);
+				const px = s.x + Math.cos(angle) * ripple.radius;
+				const py = s.y + Math.sin(angle) * ripple.radius;
+				const particle = new Particle(px, py, centerX, centerY);
+				particle.active = true;
+				particle.fadeAlpha = 0.0; // Fade in gradually
+				// Give slight tangential velocity to join the rotation
+				particle.vx = -Math.sin(angle) * 2.0; // Tangential velocity
+				particle.vy = Math.cos(angle) * 2.0;
+				list.push(particle);
 			}
 
-			ripple.alpha = 1.0 - ripplePhase; // Fade over full cycle
-			return ripplePhase < 1.0 && ripple.radius < 400;
-		});
-
-		// Spawn new ripple cycle - slower intervals, speeds up as station ages
-		const baseInterval = 15000; // 15 seconds base (more time between bursts)
-		const rippleInterval = baseInterval - (1.0 - lifeRatio) * 8000; // 15s -> 7s
-		if (now >= s.nextRippleTime) {
-			s.ripples.push({
-				radius: 0,
-				speed: 1.5,
-				alpha: 1.0,
-				birthTime: now,
-				isCharging: true,
-			});
-			s.nextRippleTime = now + rippleInterval;
+			ripple.lastParticleSpawn = now;
 		}
 
 		// Check cursor capture - only when manually controlled
@@ -1876,16 +2150,7 @@ function updateStations() {
 			const distCursor = Math.sqrt(dxCursor * dxCursor + dyCursor * dyCursor);
 
 			if (distCursor < CONFIG.STATION_CAPTURE_RADIUS) {
-				// Cursor captures station - apply random buff
-				if (Math.random() < 0.5) {
-					// Shield buff
-					cursorBuffs.shieldActive = true;
-					cursorBuffs.shieldEndTime = now + 10000; // 10 seconds
-				} else {
-					// Damage boost
-					cursorBuffs.damageBoostActive = true;
-					cursorBuffs.damageBoostEndTime = now + 10000; // 10 seconds
-				}
+				// Cursor captures station - just remove it, no buffs
 				return false; // Remove station
 			}
 		}
@@ -1900,6 +2165,26 @@ function updateStations() {
 			if (dist < CONFIG.STATION_CAPTURE_RADIUS + v.radius * 0.5) {
 				// Virus captures station - apply regen boost
 				v.regenBoostEndTime = now + 15000; // 15 seconds of boosted regen
+
+				// VISUAL FEEDBACK: Spawn particle stream from station to virus
+				// Only spawn if below initial particle count
+				if (list.length < initialParticleCount) {
+					const angle = Math.atan2(-dy, -dx); // Toward virus
+					const particleCount = 20; // More particles for bigger entity
+					const maxToSpawn = Math.max(0, initialParticleCount - list.length);
+					for (let i = 0; i < Math.min(particleCount, maxToSpawn); i++) {
+						const progress = i / particleCount; // 0 to 1
+						const px = s.x - dx * progress;
+						const py = s.y - dy * progress;
+						const particle = new Particle(px, py, centerX, centerY);
+						particle.active = true;
+						// Velocity toward virus
+						particle.vx = Math.cos(angle) * 5.0;
+						particle.vy = Math.sin(angle) * 5.0;
+						list.push(particle);
+					}
+				}
+
 				return false; // Remove station
 			}
 		}
@@ -1914,6 +2199,27 @@ function updateStations() {
 			if (dist < CONFIG.STATION_CAPTURE_RADIUS) {
 				// Anomaly captures station - apply vortex boost
 				a.vortexBoostEndTime = now + 12000; // 12 seconds of boosted vortex
+
+				// VISUAL FEEDBACK: Spawn spiral particle stream from station to anomaly
+				// Only spawn if below initial particle count
+				if (list.length < initialParticleCount) {
+					const particleCount = 18;
+					const maxToSpawn = Math.max(0, initialParticleCount - list.length);
+					for (let i = 0; i < Math.min(particleCount, maxToSpawn); i++) {
+						const progress = i / particleCount; // 0 to 1
+						const spiralOffset = progress * Math.PI * 2; // One full rotation
+						const px = s.x - dx * progress + Math.cos(spiralOffset) * 15;
+						const py = s.y - dy * progress + Math.sin(spiralOffset) * 15;
+						const particle = new Particle(px, py, centerX, centerY);
+						particle.active = true;
+						// Velocity toward anomaly with spiral
+						const angle = Math.atan2(-dy, -dx);
+						particle.vx = Math.cos(angle) * 4.5;
+						particle.vy = Math.sin(angle) * 4.5;
+						list.push(particle);
+					}
+				}
+
 				return false; // Remove station
 			}
 		}
@@ -1998,8 +2304,10 @@ function init() {
 		}
 	}
 
+	initialParticleCount = list.length; // Store initial count to prevent over-spawning
 	maxParticleDistance = Math.max(...list.map((p) => p.distFromCenter));
 
+	// Start cursor at center (hidden during spawn)
 	cursorX = targetX = centerX;
 	cursorY = targetY = centerY;
 
@@ -2012,6 +2320,9 @@ function init() {
 
 	startTime = Date.now();
 	lastFrameTime = startTime;
+
+	// Randomize cursor delay - 10 to 13 seconds before cursor becomes active
+	cursorDelay = 10000 + Math.random() * 3000; // 10-13 seconds
 
 	// Randomize first virus spawn time - later to let player build up field first
 	const firstSpawnDelay = isMobile
@@ -2058,6 +2369,13 @@ function init() {
 		canvas.addEventListener(
 			"touchstart",
 			(e) => {
+				// Check if touch is on debug icon - let it through
+				const target = e.target;
+				const debugIcon = document.getElementById('debug-icon');
+				if (debugIcon && (target === debugIcon || debugIcon.contains(target))) {
+					return; // Let the debug icon handle its own touch events
+				}
+
 				e.preventDefault();
 				if (e.touches.length > 0) {
 					handleInput(e.touches[0].clientX, e.touches[0].clientY);
@@ -2068,6 +2386,13 @@ function init() {
 		canvas.addEventListener(
 			"touchmove",
 			(e) => {
+				// Check if touch is on debug icon - let it through
+				const target = e.target;
+				const debugIcon = document.getElementById('debug-icon');
+				if (debugIcon && (target === debugIcon || debugIcon.contains(target))) {
+					return; // Let the debug icon handle its own touch events
+				}
+
 				e.preventDefault();
 				if (e.touches.length > 0) {
 					handleInput(e.touches[0].clientX, e.touches[0].clientY);
@@ -2120,9 +2445,9 @@ function updateDebugPanel() {
 
 	for (let i = 0; i < outbreaks.length; i++) {
 		const o = outbreaks[i];
-		if (o.frame < 360) continue;
+		if (o.frame < 240) continue;
 
-		const pullAge = o.frame - 360;
+		const pullAge = o.frame - 240;
 		const initialProgress = Math.min(pullAge / 1800, 1.0);
 		const continuousGrowth = Math.min(pullAge / 5400, 1.2);
 		const baseMultiplier =
@@ -2186,7 +2511,7 @@ function updateDebugPanel() {
 				healthPercent: ((largestBlackHole.health / largestBlackHole.maxHealth) * 100).toFixed(0),
 				radius: Math.floor(largestBlackHole.radius),
 				frame: largestBlackHole.frame,
-				phase: largestBlackHole.frame < 360 ? 'PUSH' : 'PULL',
+				phase: largestBlackHole.frame < 240 ? 'PUSH' : 'PULL',
 				pullRadius: Math.floor(largestPullRadius),
 				pullForce: (largestPullRadius / largestBlackHole.radius).toFixed(1),
 				regenActive: largestBlackHole.regenBoostEndTime && now < largestBlackHole.regenBoostEndTime,
@@ -2246,6 +2571,8 @@ function step() {
 		updateOutbreaks();
 		updateAnomalies();
 		updateStations();
+		// Shock waves disabled - cursor spawns particles instead
+		// updateShockWaves();
 	}
 
 	updateCursor(deltaTime);
@@ -2268,8 +2595,16 @@ function step() {
 				cursorVy,
 			);
 		}
+
+		// Remove consumed particles (permanently deleted by black holes)
+		list = list.filter(p => !p.consumed);
 	} else {
 		// RENDER FRAME
+		// Apply cursor repulsion on render frames too to prevent trails when moving fast
+		for (let i = 0; i < list.length; i++) {
+			list[i].applyCursorRepulsion(cursorX, cursorY, radiusMultiplier);
+		}
+
 		// Create fresh ImageData each frame (faster than clearing)
 		imageData = ctx.createImageData(w, h);
 		const data = imageData.data;
@@ -2277,58 +2612,69 @@ function step() {
 		const baseColor = CONFIG.COLOR;
 		for (let i = 0; i < list.length; i++) {
 			const p = list[i];
-			if (!p.active) continue;
+			if (!p.active || p.fadeAlpha < 0.01) continue; // Skip if invisible
 
 			const px = Math.floor(p.x);
 			const py = Math.floor(p.y);
 			if (px < 0 || px >= w || py < 0 || py >= h) continue;
 
+			// Start with fade alpha (smooth grow/shrink)
+			let fadeVisibility = p.fadeAlpha;
+			let blackHoleDimming = 1.0; // Separate from fade
+
 			// Black holes reduce visibility of particles
-			let visibility = 1.0;
 			for (let j = 0; j < outbreaks.length; j++) {
 				const o = outbreaks[j];
-				if (o.frame < 360) continue; // Only pull phase
+				if (o.frame < 240) continue; // Only pull phase
 
 				const dx = p.x - o.x;
 				const dy = p.y - o.y;
 				const dist = Math.sqrt(dx * dx + dy * dy);
 
-				// Calculate pull radius
-				const pullAge = o.frame - 360;
-				const initialProgress = Math.min(pullAge / 1200, 1.0);
-				const continuousGrowth = Math.min(pullAge / 3600, 1.5);
+				// Calculate pull radius (must match particle physics calculations)
+				const pullAge = o.frame - 240;
+				const initialProgress = Math.min(pullAge / 1800, 1.0);
+				const continuousGrowth = Math.min(pullAge / 5400, 1.2);
 				const baseMultiplier =
 					CONFIG.OUTBREAK_PULL_RADIUS_MIN +
 					(CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) *
 						initialProgress;
-				const pullRadiusMultiplier = baseMultiplier + continuousGrowth * 1.5;
-				const pullRadius = o.radius * pullRadiusMultiplier;
+				const pullRadiusMultiplier = baseMultiplier + continuousGrowth * 1.67;
+
+				// Calculate organic radius with morphing (match particle physics)
+				const morphPulse = Math.sin(o.frame * 0.03) * 0.08 + Math.sin(o.frame * 0.05) * 0.03 + Math.sin(o.frame * 0.02) * 0.02 + 1.0;
+				const organicRadius = o.radius * morphPulse;
+				const pullRadius = organicRadius * pullRadiusMultiplier;
 
 				if (dist < pullRadius) {
-					// Create ring of darkness - darkest at 60% radius, then recovers toward center
+					// Original ring of darkness effect - grey gradient → black ring → visible center with particles
 					const fadeProgress = 1.0 - dist / pullRadius;
 
 					let dimming;
 					if (fadeProgress < 0.6) {
-						// Outer area: gradually darken from 20% to 50%
-						dimming = 0.2 + (fadeProgress / 0.6) * 0.3; // From 20% darker to 50% darker
+						// Outer area: gradually darken with smooth gradient (grey)
+						dimming = fadeProgress * 0.5; // 0% to 30% darkening
 					} else {
-						// Inner area: recover visibility toward center but cap at 80%
-						const recovery = (fadeProgress - 0.6) / 0.4; // 0 to 1 as we approach center
-						dimming = 0.5 - recovery * 0.3; // Recovers from 50% to 20% darker (80% visible at center)
+						// Inner area: black ring that recovers toward center
+						const recovery = (fadeProgress - 0.6) / 0.4;
+						dimming = 0.3 + recovery * 0.4; // Peak at 70% dark, then lighter
 					}
 
-					visibility = Math.min(visibility, 1.0 - dimming);
+					blackHoleDimming = Math.min(blackHoleDimming, 1.0 - dimming);
 				}
 			}
 
 			const idx = (px + py * w) * 4;
-			const color = baseColor * visibility;
+			// Combine fade (alpha) with black hole dimming (darkening)
+			const color = baseColor * blackHoleDimming;
 			data[idx] = data[idx + 1] = data[idx + 2] = color;
-			data[idx + 3] = 255;
+			data[idx + 3] = Math.floor(255 * fadeVisibility); // Fade affects alpha channel
 		}
 
 		ctx.putImageData(imageData, 0, 0);
+
+		// Shock waves affect particles only - no visual markers drawn on canvas
+		// The expanding wave disables particles it touches (see updateShockWaves function)
 
 		// Cursor buffs now only visible through particle behavior (no canvas drawing)
 		// Energy stations now only visible through particle ring/burst effects (no visual marker)
@@ -2381,12 +2727,14 @@ function handleResize() {
 	outbreaks = [];
 	anomalies = [];
 	stations = [];
+	shockWaves = [];
 	cursorVx = 0;
 	cursorVy = 0;
 	radiusMultiplier = 1.0;
 	pathTime = 0;
 	disruptionActive = false;
 	disruptionIntensity = 0;
+	nextShockWaveTime = 0;
 
 	// Reinitialize
 	init();

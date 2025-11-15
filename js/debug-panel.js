@@ -22,7 +22,7 @@ class DebugPanel {
 	createIcon() {
 		this.iconElement = document.createElement("div");
 		this.iconElement.id = "debug-icon";
-		this.iconElement.innerHTML = "?";
+		this.iconElement.innerHTML = "⚙";
 
 		// Check if mobile
 		const isMobile = window.innerWidth <= 768 || window.matchMedia("(orientation: portrait)").matches;
@@ -39,8 +39,8 @@ class DebugPanel {
 			this.iconElement.style.right = '30px';
 		}
 
-		this.iconElement.style.width = '32px';
-		this.iconElement.style.height = '32px';
+		this.iconElement.style.width = '40px';
+		this.iconElement.style.height = '40px';
 		this.iconElement.style.background = 'rgba(0, 0, 0, 0.4)';
 		this.iconElement.style.color = 'rgba(255, 255, 255, 0.3)';
 		this.iconElement.style.border = '1px solid rgba(255, 255, 255, 0.15)';
@@ -49,28 +49,66 @@ class DebugPanel {
 		this.iconElement.style.alignItems = 'center';
 		this.iconElement.style.justifyContent = 'center';
 		this.iconElement.style.fontFamily = "'JetBrains Mono', monospace";
-		this.iconElement.style.fontSize = '16px';
-		this.iconElement.style.fontWeight = '500';
+		this.iconElement.style.fontSize = '20px';
+		this.iconElement.style.fontWeight = '400';
 		this.iconElement.style.cursor = 'pointer';
+		this.iconElement.style.pointerEvents = 'auto';
 		this.iconElement.style.zIndex = '9999';
 		this.iconElement.style.transition = 'all 0.2s ease';
 		this.iconElement.style.backdropFilter = 'blur(4px)';
 		this.iconElement.style.webkitBackdropFilter = 'blur(4px)';
+		this.iconElement.style.userSelect = 'none';
+		this.iconElement.style.webkitUserSelect = 'none';
+		this.iconElement.style.touchAction = 'manipulation';
+		this.iconElement.style.webkitTapHighlightColor = 'transparent';
 
-		// Hover effect
-		this.iconElement.addEventListener("mouseenter", () => {
+		// Hover/touch active effect
+		const setActiveState = () => {
 			this.iconElement.style.background = "rgba(0, 0, 0, 0.6)";
 			this.iconElement.style.color = "rgba(255, 255, 255, 0.6)";
 			this.iconElement.style.borderColor = "rgba(255, 255, 255, 0.3)";
-		});
+		};
 
-		this.iconElement.addEventListener("mouseleave", () => {
+		const setInactiveState = () => {
 			this.iconElement.style.background = "rgba(0, 0, 0, 0.4)";
 			this.iconElement.style.color = "rgba(255, 255, 255, 0.3)";
 			this.iconElement.style.borderColor = "rgba(255, 255, 255, 0.15)";
-		});
+		};
 
-		this.iconElement.addEventListener("click", () => {
+		// Mouse events for desktop
+		this.iconElement.addEventListener("mouseenter", setActiveState);
+		this.iconElement.addEventListener("mouseleave", setInactiveState);
+
+		// Touch/click handling with proper event management
+		let touchUsed = false;
+
+		// Touch events for mobile (with debugging and click prevention)
+		this.iconElement.addEventListener("touchstart", (e) => {
+			console.log('DEBUG: touchstart fired on icon');
+			touchUsed = true;
+			e.preventDefault();
+			e.stopPropagation();
+			setActiveState();
+		}, { passive: false });
+
+		this.iconElement.addEventListener("touchend", (e) => {
+			console.log('DEBUG: touchend fired on icon');
+			e.preventDefault();
+			e.stopPropagation();
+			setInactiveState();
+			this.toggle();
+		}, { passive: false });
+
+		// Click event for desktop (prevent on touch devices)
+		this.iconElement.addEventListener("click", (e) => {
+			console.log('DEBUG: click fired on icon, touchUsed:', touchUsed);
+			// Prevent click if touch was used (avoids double-firing)
+			if (touchUsed) {
+				e.preventDefault();
+				e.stopPropagation();
+				return;
+			}
+			e.stopPropagation();
 			this.toggle();
 		});
 
@@ -100,16 +138,18 @@ class DebugPanel {
 		if (this.element) {
 			this.element.style.display = this.enabled ? "block" : "none";
 		}
-		// Update icon appearance when panel is open
+		// Update icon appearance when panel is open (rotate cog wheel)
 		if (this.iconElement) {
 			if (this.enabled) {
 				this.iconElement.style.background = "rgba(0, 0, 0, 0.7)";
 				this.iconElement.style.color = "rgba(255, 255, 255, 0.8)";
 				this.iconElement.style.borderColor = "rgba(255, 255, 255, 0.4)";
+				this.iconElement.style.transform = "rotate(180deg)";
 			} else {
 				this.iconElement.style.background = "rgba(0, 0, 0, 0.4)";
 				this.iconElement.style.color = "rgba(255, 255, 255, 0.3)";
 				this.iconElement.style.borderColor = "rgba(255, 255, 255, 0.15)";
+				this.iconElement.style.transform = "rotate(0deg)";
 			}
 		}
 	}
@@ -138,7 +178,7 @@ class DebugPanel {
 
 		// Create static header with close button
 		const header = document.createElement("div");
-		header.style.cssText = "margin-bottom: 16px; border-bottom: 2px solid #fff; padding-bottom: 8px; position: relative;";
+		header.style.cssText = "margin-bottom: 16px; padding-bottom: 8px; position: relative;";
 		header.innerHTML = `
 			<strong style="font-size: 14px;">DEBUG PANEL</strong>
 			<button id="close-debug-btn" style="
@@ -159,7 +199,7 @@ class DebugPanel {
 				align-items: center;
 				justify-content: center;
 			">×</button>
-			<div style="font-size: 10px; color: #888; margin-top: 4px;">Press ? to toggle</div>
+			<div style="font-size: 10px; color: #888; margin-top: 4px;">Press ? or tap ⚙ to toggle</div>
 		`;
 
 		// Create static controls section
@@ -223,11 +263,33 @@ class DebugPanel {
 		// Close button
 		const closeBtn = this.element.querySelector('#close-debug-btn');
 		if (closeBtn) {
+			// Add touch support
+			closeBtn.style.touchAction = 'manipulation';
+
+			// Track which event type fired to prevent double-firing
+			let closeTouchUsed = false;
+			let closeResetTimeout;
+
+			closeBtn.addEventListener('touchend', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				closeTouchUsed = true;
+				clearTimeout(closeResetTimeout);
+				closeResetTimeout = setTimeout(() => { closeTouchUsed = false; }, 300);
+				this.toggle();
+			}, { passive: false });
+
 			closeBtn.addEventListener('click', (e) => {
 				e.preventDefault();
 				e.stopPropagation();
+				// Prevent click if touch was used (avoids double-firing)
+				if (closeTouchUsed) {
+					console.log('DEBUG: Close button click blocked (touch already fired)');
+					return;
+				}
 				this.toggle();
 			});
+
 			// Hover effect for close button
 			closeBtn.addEventListener("mouseenter", () => {
 				closeBtn.style.color = "rgba(255, 255, 255, 1.0)";
@@ -239,62 +301,39 @@ class DebugPanel {
 			console.error('Close button not found');
 		}
 
-		// Spawn Virus button
-		const spawnVirusBtn = this.element.querySelector('#spawn-virus-btn');
-		if (spawnVirusBtn) {
-			spawnVirusBtn.addEventListener('click', () => {
-				if (typeof window.debugSpawnVirus === 'function') {
-					window.debugSpawnVirus();
-					// Visual feedback
-					spawnVirusBtn.style.transform = 'scale(0.95)';
-					setTimeout(() => {
-						spawnVirusBtn.style.transform = 'scale(1)';
-					}, 100);
-				} else {
-					console.error('debugSpawnVirus function not found');
-				}
-			});
-		} else {
-			console.error('Virus button not found');
-		}
+		// Helper function for button setup
+		const setupButton = (buttonId, spawnFunction, buttonName) => {
+			const button = this.element.querySelector(buttonId);
+			if (button) {
+				button.style.touchAction = 'manipulation';
 
-		// Spawn Anomaly button
-		const spawnAnomalyBtn = this.element.querySelector('#spawn-anomaly-btn');
-		if (spawnAnomalyBtn) {
-			spawnAnomalyBtn.addEventListener('click', () => {
-				if (typeof window.debugSpawnAnomaly === 'function') {
-					window.debugSpawnAnomaly();
-					// Visual feedback
-					spawnAnomalyBtn.style.transform = 'scale(0.95)';
-					setTimeout(() => {
-						spawnAnomalyBtn.style.transform = 'scale(1)';
-					}, 100);
-				} else {
-					console.error('debugSpawnAnomaly function not found');
-				}
-			});
-		} else {
-			console.error('Anomaly button not found');
-		}
+				const handleSpawn = (e) => {
+					e.preventDefault();
+					e.stopPropagation();
 
-		// Spawn Station button
-		const spawnStationBtn = this.element.querySelector('#spawn-station-btn');
-		if (spawnStationBtn) {
-			spawnStationBtn.addEventListener('click', () => {
-				if (typeof window.debugSpawnStation === 'function') {
-					window.debugSpawnStation();
-					// Visual feedback
-					spawnStationBtn.style.transform = 'scale(0.95)';
-					setTimeout(() => {
-						spawnStationBtn.style.transform = 'scale(1)';
-					}, 100);
-				} else {
-					console.error('debugSpawnStation function not found');
-				}
-			});
-		} else {
-			console.error('Station button not found');
-		}
+					if (typeof spawnFunction === 'function') {
+						spawnFunction();
+						// Visual feedback
+						button.style.transform = 'scale(0.95)';
+						setTimeout(() => {
+							button.style.transform = 'scale(1)';
+						}, 100);
+					} else {
+						console.error(`${buttonName} function not found`);
+					}
+				};
+
+				button.addEventListener('click', handleSpawn);
+				button.addEventListener('touchend', handleSpawn, { passive: false });
+			} else {
+				console.error(`${buttonName} button not found`);
+			}
+		};
+
+		// Setup all spawn buttons
+		setupButton('#spawn-virus-btn', window.debugSpawnVirus, 'debugSpawnVirus');
+		setupButton('#spawn-anomaly-btn', window.debugSpawnAnomaly, 'debugSpawnAnomaly');
+		setupButton('#spawn-station-btn', window.debugSpawnStation, 'debugSpawnStation');
 	}
 
 	update(debugData) {
