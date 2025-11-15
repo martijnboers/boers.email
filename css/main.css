@@ -91,21 +91,29 @@ p {
 
 .tree {
     width: 100%;
-    max-width: 380px;
-    height: 400px;
+    max-width: 180px;
+    height: 200px;
     vertical-align: middle;
     object-fit: cover;
-    opacity: 0.8 !important;
-    filter: brightness(0.7);
+    opacity: 0.5 !important;
+    filter: brightness(0.5);
+    display: block;
+    margin: 0 auto;
 }
 
 ul {
     font-size: 14px;
     list-style: none;
-    padding-right: 4px;
-    padding-left: 4px;
-    border: 1px solid hsla(0, 0%, 100%, .3);
+    padding: 0;
+    margin: 0;
     pointer-events: auto;
+}
+
+ul.header-section,
+ul.contact-section {
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid hsla(0, 0%, 100%, .2);
+    padding: 16px 20px;
 }
 
 ul.header-section {
@@ -114,56 +122,31 @@ ul.header-section {
 }
 
 ul.visual-section {
-    margin-top: 0;
-    margin-bottom: 15px;
+    border: none;
+    padding: 0;
+    margin: 0 0 15px 0;
 }
 
 ul.contact-section {
-    margin-top: 0;
+    margin-bottom: 15px;
 }
 
 li {
-    padding: 3px 1px 4px;
+    padding: 6px 0;
     display: flex;
     justify-content: space-between;
+    align-items: flex-start;
 }
 
 li strong {
     text-transform: uppercase;
     font-weight: 400;
-    font-size: 14px
+    font-size: 14px;
+    opacity: 0.9;
 }
 
 li span {
-    text-align: right
-}
-
-li + li {
-    border-top: 1px solid hsla(0, 0%, 100%, .3)
-}
-
-/* Remove borders in header section */
-ul.header-section li + li {
-    border-top: none;
-}
-
-/* Remove borders in visual section */
-ul.visual-section li:first-child {
-    border-top: none;
-}
-
-ul.visual-section li.animation-container {
-    border-top: none;
-}
-
-/* Remove border on first contact item */
-ul.contact-section li:first-child {
-    border-top: none;
-}
-
-li.tree-container {
-    background: transparent !important;
-    padding: 0;
+    text-align: right;
 }
 
 li h1, li h2, li p {
@@ -171,15 +154,57 @@ li h1, li h2, li p {
     width: 100%;
 }
 
-/* Add spacing around bio text */
-li.blocked:has(p) {
-    padding-top: 4px;
-    padding-bottom: 18px;
+li h1 {
+    margin-bottom: 8px;
 }
 
-/* Desktop: hide mobile animation container */
-li.animation-container {
+li h2 {
+    margin-bottom: 16px;
+}
+
+li p {
+    line-height: 1.7;
+}
+
+li.tree-container {
     display: none;
+}
+
+li.animation-container {
+    display: block;
+    height: 600px;
+    padding: 0;
+    background: #000;
+    position: relative;
+    overflow: hidden;
+}
+
+li.divider-top {
+    padding-top: 14px;
+    margin-top: 8px;
+    border-top: 1px solid hsla(0, 0%, 100%, .15);
+}
+
+/* Desktop: merge into single panel and hide mobile animation */
+@media (min-width: 769px) and (orientation: landscape) {
+    ul.header-section {
+        margin-bottom: 0;
+        border-bottom: none;
+    }
+
+    ul.visual-section {
+        display: none;
+    }
+
+    ul.contact-section {
+        margin-top: 0;
+        margin-bottom: 15px;
+        border-top: none;
+    }
+
+    li.animation-container {
+        display: none;
+    }
 }
 
 /* Mobile/vertical screen adjustments */
@@ -201,19 +226,25 @@ li.animation-container {
         min-height: 100vh;
     }
 
-    /* Hide desktop tree on mobile */
-    li.tree-container {
+    /* Mobile: keep all sections separate */
+    ul.header-section {
+        margin-bottom: 15px;
+        border: 1px solid hsla(0, 0%, 100%, .2);
+    }
+
+    ul.contact-section {
+        margin-top: 0;
+        margin-bottom: 15px;
+        border: 1px solid hsla(0, 0%, 100%, .2);
+    }
+
+    li.divider-top {
         display: none;
     }
 
-    /* Show mobile animation in page flow */
-    li.animation-container {
-        display: block;
-        height: 600px;
+    ul.visual-section {
+        border: 1px solid hsla(0, 0%, 100%, .2);
         padding: 0;
-        background: #000;
-        position: relative;
-        overflow: hidden;
     }
 
     #container-mobile {
@@ -223,6 +254,7 @@ li.animation-container {
         position: absolute;
         top: 0;
         left: 0;
+        pointer-events: auto;
     }
 
     #container-mobile canvas {
@@ -233,5 +265,14 @@ li.animation-container {
         position: absolute;
         top: 0;
         left: 0;
+        pointer-events: auto;
+    }
+
+    ul.visual-section {
+        pointer-events: auto;
+    }
+
+    li.animation-container {
+        pointer-events: auto;
     }
 }
