@@ -35,7 +35,7 @@ const CONFIG = {
 	OUTBREAK_SPAWN_MAX: 18000,
 	OUTBREAK_SPAWN_MIN_MOBILE: 40000,
 	OUTBREAK_SPAWN_MAX_MOBILE: 22000,
-	OUTBREAK_GROWTH_RATE: 0.4,
+	OUTBREAK_GROWTH_RATE: 0.35, // Slower growth to keep playable space
 	OUTBREAK_GROWTH_RATE_MOBILE: 0.35,
 	OUTBREAK_MAX_RADIUS: 140,
 	OUTBREAK_MAX_RADIUS_MOBILE: 120,
@@ -43,7 +43,7 @@ const CONFIG = {
 	OUTBREAK_DAMAGE_RADIUS: 100,
 	OUTBREAK_DISSOLVE_RADIUS: 25,
 	OUTBREAK_PULL_RADIUS_MIN: 0.5, // Start pulling at 50% of virus size
-	OUTBREAK_PULL_RADIUS_MAX: 2.0, // Can pull up to 2.0x virus size (reduced from 2.5)
+	OUTBREAK_PULL_RADIUS_MAX: 2.5, // Original pull radius for beautiful visuals
 
 	// Anomalies
 	ANOMALY_SPAWN_MIN: 12000,
@@ -58,8 +58,8 @@ const CONFIG = {
 	ANOMALY_DISSOLVE_RADIUS: 20,
 
 	// Energy Stations
-	STATION_SPAWN_MIN: 30000,
-	STATION_SPAWN_MAX: 60000,
+	STATION_SPAWN_MIN: 40000, // Spawn less frequently (was 30000)
+	STATION_SPAWN_MAX: 75000, // (was 60000)
 	STATION_DRIFT_SPEED: 0.15,
 	STATION_CAPTURE_RADIUS: 35,
 	STATION_LIFETIME: 75000, // 75 seconds before despawn
@@ -297,23 +297,23 @@ class Particle {
 			const oDistSq = odx * odx + ody * ody;
 			const oDist = Math.sqrt(oDistSq);
 
-			// Subtle organic growth variation (not heavy breathing)
+			// Subtle organic growth variation (reduced for smoother feel)
 			const morphPulse =
-				Math.sin(o.frame * 0.05) * 0.05 +
-				Math.sin(o.frame * 0.02 + this.angle * 2) * 0.04 +
+				Math.sin(o.frame * 0.05) * 0.03 +
+				Math.sin(o.frame * 0.02 + this.angle * 2) * 0.02 +
 				1.0;
 
-			// Asymmetric tentacle-like directional variations
+			// Asymmetric tentacle-like directional variations (reduced)
 			const angleToParticle = Math.atan2(ody, odx);
 			const tentacleVariation =
-				Math.sin(angleToParticle * 3 + o.frame * 0.03) * 0.08 +
-				Math.cos(angleToParticle * 5 - o.frame * 0.04) * 0.06;
+				Math.sin(angleToParticle * 3 + o.frame * 0.03) * 0.05 +
+				Math.cos(angleToParticle * 5 - o.frame * 0.04) * 0.04;
 
 			const organicRadius = o.radius * morphPulse * (1.0 + tentacleVariation);
 			const currentRadiusSq = organicRadius ** 2;
 
-			if (o.frame < 360) {
-				// Push phase - growing organism expanding (longer: 360 frames = 6 seconds)
+			if (o.frame < 240) {
+				// Push phase - growing organism expanding (240 frames = 4 seconds, shorter for more playable time)
 				const edgeThickness = 18;
 				const innerRadiusSq = Math.max(0, organicRadius - edgeThickness) ** 2;
 
@@ -327,7 +327,7 @@ class Particle {
 				}
 			} else {
 				// Pull phase - death black hole effect with slow, continuous growth
-				const pullAge = o.frame - 360;
+				const pullAge = o.frame - 240;
 
 				// Very slow progression - takes 30 seconds to reach initial full power
 				const initialProgress = Math.min(pullAge / 1800, 1.0);
@@ -335,7 +335,7 @@ class Particle {
 				// Then continues growing much more slowly over 90 seconds total
 				const continuousGrowth = Math.min(pullAge / 5400, 1.2); // Up to 1.2x over 90 seconds
 
-				// Pull radius grows from 50% to 200%, then up to 320% over 90 seconds
+				// Pull radius grows from 50% to 250%, then up to ~400% over 90 seconds
 				const baseMultiplier =
 					CONFIG.OUTBREAK_PULL_RADIUS_MIN +
 					(CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) *
@@ -364,7 +364,7 @@ class Particle {
 			}
 		}
 
-		// Energy stations - arrange particles into a space invader style emblem
+		// Energy stations - create geometric grid patterns
 		// Only apply forces if stations exist and this is an active particle
 		if (stations.length > 0 && this.active) {
 			for (let i = 0; i < stations.length; i++) {
@@ -372,135 +372,76 @@ class Particle {
 				const sdx = this.x - s.x;
 				const sdy = this.y - s.y;
 				const sDistSq = sdx * sdx + sdy * sdy;
+				const sDist = Math.sqrt(sDistSq);
 
-				// Emblem shrinks over time as it approaches capture-ready state
+				// Compact grid pattern for clean geometric aesthetic
 				const age = Date.now() - s.spawnTime;
-				const lifeRatio = 1.0 - age / CONFIG.STATION_LIFETIME;
-				const sizeScale = 0.4 + lifeRatio * 0.6;
-
-				const baseSize = 32; // Base size for the emblem
-				const pixelSize = (baseSize * sizeScale) / 8; // Grid unit size
-				const halfWidth = 4 * pixelSize;
-				const pullRadius = halfWidth * 1.5;
+				const gridRadius = 35; // Fixed small size - looks clean in the particle battle
 
 				// Early exit if too far
-				if (Math.abs(sdx) > pullRadius || Math.abs(sdy) > pullRadius) continue;
+				if (sDist > gridRadius * 1.2) continue;
 
-				// Space invader pixel art pattern (8x8 grid, symmetric)
-				// Define horizontal line segments for each row
-				// Format: [y_offset, x_start, x_end] in grid units
-				const pattern = [
-					// Top antenna
-					[-3.5, -1, 1],
-					// Head
-					[-2.5, -2, 2],
-					[-1.5, -3, 3],
-					// Body with notches
-					[-0.5, -3, -2],
-					[-0.5, -1, 1],
-					[-0.5, 2, 3],
-					[0.5, -3, 3],
-					// Legs
-					[1.5, -3, -2],
-					[1.5, 2, 3],
-					[2.5, -2, -1],
-					[2.5, 1, 2],
-				];
+				// Snap particles to grid positions for blocky effect
+				const gridSpacing = isMobile ? CONFIG.SPACING_MOBILE * 2 : CONFIG.SPACING_DESKTOP * 2;
 
-				let closestDist = Infinity;
-				let closestSegment = null;
+				// Calculate target grid position relative to station
+				const localX = sdx;
+				const localY = sdy;
+				const gridX = Math.round(localX / gridSpacing) * gridSpacing;
+				const gridY = Math.round(localY / gridSpacing) * gridSpacing;
+				const targetX = s.x + gridX;
+				const targetY = s.y + gridY;
 
-				// Find closest line segment
-				for (const seg of pattern) {
-					const rowY = s.y + seg[0] * pixelSize;
-					const segStartX = s.x + seg[1] * pixelSize;
-					const segEndX = s.x + seg[2] * pixelSize;
+				// Distance to nearest grid point
+				const gridDx = targetX - this.x;
+				const gridDy = targetY - this.y;
+				const gridDistSq = gridDx * gridDx + gridDy * gridDy;
+				const gridDist = Math.sqrt(gridDistSq);
 
-					// Distance to horizontal line segment
-					const distToRow = Math.abs(this.y - rowY);
+				// Only snap if within station radius
+				const targetDist = Math.sqrt(gridX * gridX + gridY * gridY);
+				if (targetDist < gridRadius && gridDist < gridSpacing * 0.6) {
+					// Pull toward grid point - creates structured pattern
+					const snapStrength = (1.0 - gridDist / (gridSpacing * 0.6)) * 2.5;
 
-					// Check if horizontally within segment
-					if (this.x >= segStartX && this.x <= segEndX) {
-						if (distToRow < closestDist) {
-							closestDist = distToRow;
-							closestSegment = {
-								type: "h",
-								y: rowY,
-								x1: segStartX,
-								x2: segEndX,
-							};
-						}
-					} else {
-						// Distance to segment endpoints
-						const distToStart = Math.sqrt(
-							(this.x - segStartX) ** 2 + (this.y - rowY) ** 2,
-						);
-						const distToEnd = Math.sqrt(
-							(this.x - segEndX) ** 2 + (this.y - rowY) ** 2,
-						);
-						const endDist = Math.min(distToStart, distToEnd);
-
-						if (endDist < closestDist) {
-							closestDist = endDist;
-							const targetX = distToStart < distToEnd ? segStartX : segEndX;
-							closestSegment = { type: "p", x: targetX, y: rowY };
-						}
-					}
+					this.vx += gridDx * snapStrength * 0.15;
+					this.vy += gridDy * snapStrength * 0.15;
 				}
 
-				// Pull particles to closest segment
-				if (closestSegment && closestDist < pixelSize * 2) {
-					const strength = (1.0 - closestDist / (pixelSize * 2)) * 3.5;
+				// Create animated geometric patterns based on station age
+				const patternTime = age * 0.002; // Slow animation
 
-					if (closestSegment.type === "h") {
-						// Pull to horizontal line
-						const dy = closestSegment.y - this.y;
-						this.vy += dy * strength * 0.6;
-					} else {
-						// Pull to point
-						const dx = closestSegment.x - this.x;
-						const dy = closestSegment.y - this.y;
-						this.vx += dx * strength * 0.5;
-						this.vy += dy * strength * 0.6;
-					}
+				// Concentric square pulses
+				const squareLevel = Math.floor(sDist / (gridSpacing * 2));
+				const squarePulse = Math.sin(patternTime - squareLevel * 0.5) * 0.5 + 0.5;
+
+				// Add subtle pulsing force to create wave effect through the grid
+				if (squarePulse > 0.6 && sDist > gridSpacing * 2) {
+					const pulseStrength = (squarePulse - 0.6) * 2.5;
+					const angle = Math.atan2(sdy, sdx);
+					this.vx += Math.cos(angle) * pulseStrength * 0.3;
+					this.vy += Math.sin(angle) * pulseStrength * 0.3;
 				}
 
-				// Station ripple waves - slow charging pull, then burst push
+				// Station ripple waves - static rotating ring formation
 				for (let r = 0; r < s.ripples.length; r++) {
 					const ripple = s.ripples[r];
 					const rippleDist = Math.sqrt(sDistSq);
 
-					// Large affected area with smooth falloff
-					const waveThickness = 200; // Very large - affects many particles
+					// Narrow ring for static formation
+					const waveThickness = 40; // Thin ring to keep particles in formation
 					const distFromWave = Math.abs(rippleDist - ripple.radius);
 
 					if (distFromWave < waveThickness) {
 						const proximityFactor = 1.0 - (distFromWave / waveThickness);
 
-						let force, angle;
-						if (ripple.isCharging) {
-							// CHARGING: Gentle pull toward station + orbital rotation for visible ring
-							const radialAngle = Math.atan2(-sdy, -sdx); // Point toward station
-							const radialForce = 12.0 * proximityFactor * ripple.alpha;
+						// Only apply orbital force - particles rotate in place without being pulled in
+						const tangentialAngle = Math.atan2(-sdy, -sdx) + Math.PI / 2; // Perpendicular for clockwise orbit
+						const orbitalForce = 6.0 * proximityFactor * ripple.alpha;
 
-							// Add tangential (orbital) force to create rotating ring
-							const tangentialAngle = radialAngle + Math.PI / 2; // Perpendicular for clockwise orbit
-							const orbitalForce = 8.0 * proximityFactor * ripple.alpha;
-
-							// Apply both radial and orbital forces
-							this.vx += radialForce * Math.cos(radialAngle) + orbitalForce * Math.cos(tangentialAngle);
-							this.vy += radialForce * Math.sin(radialAngle) + orbitalForce * Math.sin(tangentialAngle);
-						} else {
-							// BURST: Spectacular radial explosion outward from station
-							angle = Math.atan2(sdy, sdx); // Point away from station
-							// Add slight random variation for more organic burst
-							const variation = (Math.random() - 0.5) * 0.3;
-							angle += variation;
-							force = 60.0 * proximityFactor * ripple.alpha; // Much stronger burst
-
-							this.vx += force * Math.cos(angle);
-							this.vy += force * Math.sin(angle);
-						}
+						// Apply only orbital force to maintain static ring
+						this.vx += orbitalForce * Math.cos(tangentialAngle);
+						this.vy += orbitalForce * Math.sin(tangentialAngle);
 					}
 				}
 			}
@@ -580,9 +521,9 @@ function updateCursor(deltaTime) {
 
 	for (let i = 0; i < outbreaks.length; i++) {
 		const o = outbreaks[i];
-		if (o.frame < 360) continue; // Only pull phase
+		if (o.frame < 240) continue; // Only pull phase
 
-		const pullAge = o.frame - 360;
+		const pullAge = o.frame - 240;
 		const initialProgress = Math.min(pullAge / 1800, 1.0);
 		const continuousGrowth = Math.min(pullAge / 5400, 1.2);
 		const baseMultiplier =
@@ -962,14 +903,14 @@ function updateCursor(deltaTime) {
 
 		for (let i = 0; i < outbreaks.length; i++) {
 			const o = outbreaks[i];
-			if (o.frame < 360) continue; // Only pull phase
+			if (o.frame < 240) continue; // Only pull phase
 
 			const dx = o.x - cursorX;
 			const dy = o.y - cursorY;
 			const dist = Math.sqrt(dx * dx + dy * dy);
 
 			// Calculate pull radius (same as particle system)
-			const pullAge = o.frame - 360;
+			const pullAge = o.frame - 240;
 			const initialProgress = Math.min(pullAge / 1200, 1.0);
 			const continuousGrowth = Math.min(pullAge / 3600, 1.5);
 			const baseMultiplier =
@@ -1031,14 +972,14 @@ function updateCursor(deltaTime) {
 
 		for (let i = 0; i < outbreaks.length; i++) {
 			const o = outbreaks[i];
-			if (o.frame < 360) continue; // Only pull phase
+			if (o.frame < 240) continue; // Only pull phase
 
 			const dx = o.x - cursorX;
 			const dy = o.y - cursorY;
 			const dist = Math.sqrt(dx * dx + dy * dy);
 
 			// Calculate pull radius (same as particle system)
-			const pullAge = o.frame - 360;
+			const pullAge = o.frame - 240;
 			const initialProgress = Math.min(pullAge / 1200, 1.0);
 			const continuousGrowth = Math.min(pullAge / 3600, 1.5);
 			const baseMultiplier =
@@ -1320,7 +1261,7 @@ function updateOutbreaks() {
 
 		if (o.health <= 0) {
 			// Black hole destroyed! Grant temporary boost
-			if (o.frame >= 360) {
+			if (o.frame >= 240) {
 				const now = Date.now();
 				cursorBuffs.blackHoleKillBoostActive = true;
 				cursorBuffs.blackHoleKillBoostEndTime = now + 8000; // 8 seconds
@@ -1789,21 +1730,45 @@ function updateStations() {
 		activeParticleRatio > 0.25 &&
 		stations.length < 2
 	) {
-		const angle = Math.random() * Math.PI * 2;
-		const distance = (0.25 + Math.random() * 0.25) * Math.min(w, h);
+		let stationX, stationY;
+
+		// Find active black holes that are consuming particles
+		const consumingBlackHoles = outbreaks.filter(o => {
+			const pullAge = o.frame - 240;
+			return o.frame >= 240 && pullAge > 1200; // In pull phase and consuming
+		});
+
+		// 60% chance to spawn inside a black hole if any exist
+		if (consumingBlackHoles.length > 0 && Math.random() < 0.6) {
+			// Pick a random consuming black hole
+			const targetBlackHole = consumingBlackHoles[Math.floor(Math.random() * consumingBlackHoles.length)];
+
+			// Spawn near the center of the black hole (within 40% of radius)
+			const spawnAngle = Math.random() * Math.PI * 2;
+			const spawnDist = Math.random() * targetBlackHole.radius * 0.4;
+
+			stationX = targetBlackHole.x + Math.cos(spawnAngle) * spawnDist;
+			stationY = targetBlackHole.y + Math.sin(spawnAngle) * spawnDist;
+		} else {
+			// Normal spawn: random position around center
+			const angle = Math.random() * Math.PI * 2;
+			const distance = (0.25 + Math.random() * 0.25) * Math.min(w, h);
+
+			stationX = centerX + Math.cos(angle) * distance;
+			stationY = centerY + Math.sin(angle) * distance;
+		}
 
 		// Random drift direction
 		const driftAngle = Math.random() * Math.PI * 2;
 
 		stations.push({
-			x: centerX + Math.cos(angle) * distance,
-			y: centerY + Math.sin(angle) * distance,
+			x: stationX,
+			y: stationY,
 			driftAngle: driftAngle,
 			frame: 0,
 			spawnTime: now,
 			captured: false,
-			ripples: [], // Active ripple waves
-			nextRippleTime: now + 3000, // First ripple after 3 seconds
+			ripples: [],
 		});
 
 		const spawnInterval =
@@ -1832,41 +1797,14 @@ function updateStations() {
 			s.driftAngle = -s.driftAngle;
 		}
 
-		// Update ripples - slow charging cycle with burst
-		const lifeRatio = 1.0 - age / CONFIG.STATION_LIFETIME;
-		s.ripples = s.ripples.filter((ripple) => {
-			const rippleAge = now - ripple.birthTime;
-			const rippleLifespan = 15000; // 15 second cycle (slower)
-			const ripplePhase = rippleAge / rippleLifespan;
-
-			// Charging phase (0-80%): Slow expansion, pulling particles in
-			// Burst phase (80-100%): Fast expansion, pushing particles out
-			if (ripplePhase < 0.80) {
-				// Charging: expand slowly
-				ripple.radius += 1.2;
-				ripple.isCharging = true;
-			} else {
-				// Burst: expand quickly
-				ripple.radius += 6.0;
-				ripple.isCharging = false;
-			}
-
-			ripple.alpha = 1.0 - ripplePhase; // Fade over full cycle
-			return ripplePhase < 1.0 && ripple.radius < 400;
-		});
-
-		// Spawn new ripple cycle - slower intervals, speeds up as station ages
-		const baseInterval = 15000; // 15 seconds base (more time between bursts)
-		const rippleInterval = baseInterval - (1.0 - lifeRatio) * 8000; // 15s -> 7s
-		if (now >= s.nextRippleTime) {
+		// Static ring formation - no expansion or fading
+		// Only create one ring per station at a fixed radius
+		if (s.ripples.length === 0) {
 			s.ripples.push({
-				radius: 0,
-				speed: 1.5,
-				alpha: 1.0,
+				radius: 80, // Fixed radius for static formation
+				alpha: 1.0, // Always visible
 				birthTime: now,
-				isCharging: true,
 			});
-			s.nextRippleTime = now + rippleInterval;
 		}
 
 		// Check cursor capture - only when manually controlled
@@ -1876,16 +1814,7 @@ function updateStations() {
 			const distCursor = Math.sqrt(dxCursor * dxCursor + dyCursor * dyCursor);
 
 			if (distCursor < CONFIG.STATION_CAPTURE_RADIUS) {
-				// Cursor captures station - apply random buff
-				if (Math.random() < 0.5) {
-					// Shield buff
-					cursorBuffs.shieldActive = true;
-					cursorBuffs.shieldEndTime = now + 10000; // 10 seconds
-				} else {
-					// Damage boost
-					cursorBuffs.damageBoostActive = true;
-					cursorBuffs.damageBoostEndTime = now + 10000; // 10 seconds
-				}
+				// Cursor captures station - just remove it, no buffs
 				return false; // Remove station
 			}
 		}
@@ -2120,9 +2049,9 @@ function updateDebugPanel() {
 
 	for (let i = 0; i < outbreaks.length; i++) {
 		const o = outbreaks[i];
-		if (o.frame < 360) continue;
+		if (o.frame < 240) continue;
 
-		const pullAge = o.frame - 360;
+		const pullAge = o.frame - 240;
 		const initialProgress = Math.min(pullAge / 1800, 1.0);
 		const continuousGrowth = Math.min(pullAge / 5400, 1.2);
 		const baseMultiplier =
@@ -2186,7 +2115,7 @@ function updateDebugPanel() {
 				healthPercent: ((largestBlackHole.health / largestBlackHole.maxHealth) * 100).toFixed(0),
 				radius: Math.floor(largestBlackHole.radius),
 				frame: largestBlackHole.frame,
-				phase: largestBlackHole.frame < 360 ? 'PUSH' : 'PULL',
+				phase: largestBlackHole.frame < 240 ? 'PUSH' : 'PULL',
 				pullRadius: Math.floor(largestPullRadius),
 				pullForce: (largestPullRadius / largestBlackHole.radius).toFixed(1),
 				regenActive: largestBlackHole.regenBoostEndTime && now < largestBlackHole.regenBoostEndTime,
@@ -2232,6 +2161,7 @@ function updateDebugPanel() {
 
 	debugPanel.update(debugData);
 }
+
 
 // ============================================================================
 // MAIN ANIMATION LOOP
@@ -2287,14 +2217,14 @@ function step() {
 			let visibility = 1.0;
 			for (let j = 0; j < outbreaks.length; j++) {
 				const o = outbreaks[j];
-				if (o.frame < 360) continue; // Only pull phase
+				if (o.frame < 240) continue; // Only pull phase
 
 				const dx = p.x - o.x;
 				const dy = p.y - o.y;
 				const dist = Math.sqrt(dx * dx + dy * dy);
 
 				// Calculate pull radius
-				const pullAge = o.frame - 360;
+				const pullAge = o.frame - 240;
 				const initialProgress = Math.min(pullAge / 1200, 1.0);
 				const continuousGrowth = Math.min(pullAge / 3600, 1.5);
 				const baseMultiplier =
@@ -2522,4 +2452,3 @@ init();
 lastWidth = window.innerWidth;
 lastHeight = window.innerHeight;
 step();
-
