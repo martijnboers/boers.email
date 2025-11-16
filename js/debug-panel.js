@@ -231,6 +231,18 @@ class DebugPanel {
 				border-radius: 3px;
 				transition: transform 0.1s ease;
 			">+ Anomaly</button>
+			<button id="spawn-station-btn" style="
+				background: rgba(255, 193, 7, 0.3);
+				border: 1px solid #FFC107;
+				color: #fff;
+				padding: 6px 12px;
+				margin: 4px;
+				cursor: pointer;
+				font-family: 'JetBrains Mono', monospace;
+				font-size: 11px;
+				border-radius: 3px;
+				transition: transform 0.1s ease;
+			">+ Station</button>
 		`;
 
 		// Create dynamic content container
@@ -321,6 +333,7 @@ class DebugPanel {
 		// Setup all spawn buttons
 		setupButton('#spawn-virus-btn', window.debugSpawnVirus, 'debugSpawnVirus');
 		setupButton('#spawn-anomaly-btn', window.debugSpawnAnomaly, 'debugSpawnAnomaly');
+		setupButton('#spawn-station-btn', window.debugSpawnStation, 'debugSpawnStation');
 	}
 
 	update(debugData) {

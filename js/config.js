@@ -54,24 +54,12 @@ export const CONFIG = {
 	ANOMALY_VORTEX_STRENGTH: 0.8,
 	ANOMALY_DISSOLVE_RADIUS: 20,
 
-    // Glyphs
-    GLYPH_SPAWN_MIN: 20000,
-    GLYPH_SPAWN_MAX: 35000,
-    GLYPH_LIFETIME: 45000, // 45 seconds
-    GLYPH_CAPTURE_RADIUS: 40,
-    GLYPH_PATTERN: [
-        { x: 0, y: 0 },
-        { x: 1, y: 0 }, { x: -1, y: 0 },
-        { x: 2, y: 0 }, { x: -2, y: 0 },
-        { x: 0, y: 1 }, { x: 0, y: -1 },
-        { x: 0, y: 2 }, { x: 0, y: -2 },
-    ],
-    GLYPH_PATTERN_SCALE: 8,
-
-	// Conduits
-	CONDUIT_SPEED: 0.4,
-	CONDUIT_CAPTURE_RADIUS: 40,
-	CONDUIT_MAX_GRAVITY_INFLUENCE: 0.05, // The max force gravity can apply per frame
+	// Energy Stations
+	STATION_SPAWN_MIN: 30000,
+	STATION_SPAWN_MAX: 60000,
+	STATION_DRIFT_SPEED: 0.15,
+	STATION_CAPTURE_RADIUS: 35,
+	STATION_LIFETIME: 75000, // 75 seconds before despawn
 
 	// Synergy between anomalies and viruses
 	SYNERGY_RANGE: 100, // Distance for synergy effects
