@@ -22,13 +22,14 @@ export class Particle {
 		// Organic behavior traits
 		this.nervousness = 0.8 + Math.random() * 0.4;
 		this.awareness = Math.random() * 40 + 25;
+        this.recycledUntil = 0;
 	}
 
 	update(state) {
         const {
             cursorX, cursorY, radiusMultiplier, spiralStrength, outbreaks,
             anomalies, cursorVx, cursorVy, isManual, cursorBuffs, isMobile,
-            activeParticleRatio, stations
+            activeParticleRatio
         } = state;
 
 		if (!this.active) return;
@@ -48,22 +49,6 @@ export class Particle {
 		// During manual control, reduce buff intensity for smoother control
 		const manualReduction = isManual ? 0.3 : 1.0; // 30% strength when manual
 
-		// Shield buff - pulsating green shield
-		if (cursorBuffs.shieldActive) {
-			hasPulsatingBuff = true;
-			const pulse = Math.sin(now * 0.008) * 0.5 + 0.5; // 0 to 1
-			pulseStrength = pulse * 12.0 * manualReduction;
-			buffRadiusMultiplier = 1.0 + (0.8 * manualReduction); // 1.8 auto, 1.24 manual
-		}
-
-		// Damage boost - faster aggressive pulsating
-		if (cursorBuffs.damageBoostActive) {
-			hasPulsatingBuff = true;
-			const pulse = Math.sin(now * 0.014) * 0.5 + 0.5; // 0 to 1, faster
-			pulseStrength = Math.max(pulseStrength, pulse * 15.0 * manualReduction);
-			buffRadiusMultiplier = Math.max(buffRadiusMultiplier, 1.0 + (1.0 * manualReduction)); // 2.0 auto, 1.3 manual
-		}
-
 		// Empowered (black hole kill) - MASSIVE dramatic pulsating (but toned down in manual)
 		if (cursorBuffs.blackHoleKillBoostActive) {
 			hasPulsatingBuff = true;
@@ -80,32 +65,38 @@ export class Particle {
 			buffRadiusMultiplier *
 			buffRadiusMultiplier;
 
-		// Anticipation - particles sense fast-moving cursor
-		const awarenessRadiusSq =
-			(this.awareness + Math.sqrt(dynamicRadiusSq)) ** 2;
-		if (distSq < awarenessRadiusSq && dist > Math.sqrt(dynamicRadiusSq)) {
-			const cursorSpeed = Math.sqrt(cursorVx * cursorVx + cursorVy * cursorVy);
-			if (cursorSpeed > 1.5) {
-				const cursorDirX = cursorVx / cursorSpeed;
-				const cursorDirY = cursorVy / cursorSpeed;
-				const toParticleX = -dx / dist;
-				const toParticleY = -dy / dist;
-				const alignmentDot =
-					cursorDirX * toParticleX + cursorDirY * toParticleY;
+		// V-Shaped Hull Displacement
+        const cursorSpeed = Math.sqrt(cursorVx * cursorVx + cursorVy * cursorVy);
+        if (cursorSpeed > 0.5 && distSq < dynamicRadiusSq * 1.5) {
+            const cursorDirX = cursorVx / cursorSpeed;
+            const cursorDirY = cursorVy / cursorSpeed;
 
-				if (alignmentDot > 0.4) {
-					const anticipationForce = alignmentDot * 0.2 * this.nervousness * buffForceMultiplier;
-					this.vx -= anticipationForce * cursorDirX;
-					this.vy -= anticipationForce * cursorDirY;
-				}
-			}
-		}
+            // Transform particle to cursor's local coordinate system
+            const localX = -dx * cursorDirX - dy * cursorDirY;
+            const localY = -dx * cursorDirY + dy * cursorDirX;
 
-		// Cursor repulsion with spiral
+            // Define V-shape angle based on speed (wider at low speed, narrower at high speed)
+            const coneAngle = Math.PI / 2.5 - Math.min(cursorSpeed / 10, 1) * (Math.PI / 4);
+            const tanAngle = Math.tan(coneAngle);
+
+            // Check if particle is within the V-shape in front of the cursor
+            if (localX > 0 && localX < Math.sqrt(dynamicRadiusSq) && Math.abs(localY) < localX * tanAngle) {
+                // Determine which side of the V to push from
+                const pushDirX = localY > 0 ? -cursorDirY : cursorDirY;
+                const pushDirY = localY > 0 ? cursorDirX : -cursorDirX;
+
+                const force = (1.0 - (localX / Math.sqrt(dynamicRadiusSq))) * cursorSpeed * 0.8;
+                
+                this.vx += pushDirX * force;
+                this.vy += pushDirY * force;
+            }
+        }
+
+		// Standard repulsion and spiral (acts as a base)
 		if (distSq < dynamicRadiusSq) {
 			const safeDist = Math.max(distSq, 1);
 			const baseForce =
-				(-dynamicRadiusSq / safeDist) * CONFIG.REPULSION_STRENGTH * buffForceMultiplier;
+				(-dynamicRadiusSq / safeDist) * CONFIG.REPULSION_STRENGTH * buffForceMultiplier * 0.5; // Reduced strength
 			const force = baseForce * this.nervousness;
 			const angle = Math.atan2(dy, dx);
 
@@ -213,148 +204,6 @@ export class Particle {
 			}
 		}
 
-		// Energy stations - arrange particles into a space invader style emblem
-		// Only apply forces if stations exist and this is an active particle
-		if (stations.length > 0 && this.active) {
-			for (let i = 0; i < stations.length; i++) {
-				const s = stations[i];
-				const sdx = this.x - s.x;
-				const sdy = this.y - s.y;
-				const sDistSq = sdx * sdx + sdy * sdy;
-
-				// Emblem shrinks over time as it approaches capture-ready state
-				const age = Date.now() - s.spawnTime;
-				const lifeRatio = 1.0 - age / CONFIG.STATION_LIFETIME;
-				const sizeScale = 0.4 + lifeRatio * 0.6;
-
-				const baseSize = 32; // Base size for the emblem
-				const pixelSize = (baseSize * sizeScale) / 8; // Grid unit size
-				const halfWidth = 4 * pixelSize;
-				const pullRadius = halfWidth * 1.5;
-
-				// Early exit if too far
-				if (Math.abs(sdx) > pullRadius || Math.abs(sdy) > pullRadius) continue;
-
-				// Space invader pixel art pattern (8x8 grid, symmetric)
-				// Define horizontal line segments for each row
-				// Format: [y_offset, x_start, x_end] in grid units
-				const pattern = [
-					// Top antenna
-					[-3.5, -1, 1],
-					// Head
-					[-2.5, -2, 2],
-					[-1.5, -3, 3],
-					// Body with notches
-					[-0.5, -3, -2],
-					[-0.5, -1, 1],
-					[-0.5, 2, 3],
-					[0.5, -3, 3],
-					// Legs
-					[1.5, -3, -2],
-					[1.5, 2, 3],
-					[2.5, -2, -1],
-					[2.5, 1, 2],
-				];
-
-				let closestDist = Infinity;
-				let closestSegment = null;
-
-				// Find closest line segment
-				for (const seg of pattern) {
-					const rowY = s.y + seg[0] * pixelSize;
-					const segStartX = s.x + seg[1] * pixelSize;
-					const segEndX = s.x + seg[2] * pixelSize;
-
-					// Distance to horizontal line segment
-					const distToRow = Math.abs(this.y - rowY);
-
-					// Check if horizontally within segment
-					if (this.x >= segStartX && this.x <= segEndX) {
-						if (distToRow < closestDist) {
-							closestDist = distToRow;
-							closestSegment = {
-								type: "h",
-								y: rowY,
-								x1: segStartX,
-								x2: segEndX,
-							};
-						}
-					} else {
-						// Distance to segment endpoints
-						const distToStart = Math.sqrt(
-							(this.x - segStartX) ** 2 + (this.y - rowY) ** 2,
-						);
-						const distToEnd = Math.sqrt(
-							(this.x - segEndX) ** 2 + (this.y - rowY) ** 2,
-						);
-						const endDist = Math.min(distToStart, distToEnd);
-
-						if (endDist < closestDist) {
-							closestDist = endDist;
-							const targetX = distToStart < distToEnd ? segStartX : segEndX;
-							closestSegment = { type: "p", x: targetX, y: rowY };
-						}
-					}
-				}
-
-				// Pull particles to closest segment
-				if (closestSegment && closestDist < pixelSize * 2) {
-					const strength = (1.0 - closestDist / (pixelSize * 2)) * 3.5;
-
-					if (closestSegment.type === "h") {
-						// Pull to horizontal line
-						const dy = closestSegment.y - this.y;
-						this.vy += dy * strength * 0.6;
-					} else {
-						// Pull to point
-						const dx = closestSegment.x - this.x;
-						const dy = closestSegment.y - this.y;
-						this.vx += dx * strength * 0.5;
-						this.vy += dy * strength * 0.6;
-					}
-				}
-
-				// Station ripple waves - slow charging pull, then burst push
-				for (let r = 0; r < s.ripples.length; r++) {
-					const ripple = s.ripples[r];
-					const rippleDist = Math.sqrt(sDistSq);
-
-					// Large affected area with smooth falloff
-					const waveThickness = 200; // Very large - affects many particles
-					const distFromWave = Math.abs(rippleDist - ripple.radius);
-
-					if (distFromWave < waveThickness) {
-						const proximityFactor = 1.0 - (distFromWave / waveThickness);
-
-						let force, angle;
-						if (ripple.isCharging) {
-							// CHARGING: Gentle pull toward station + orbital rotation for visible ring
-							const radialAngle = Math.atan2(-sdy, -sdx); // Point toward station
-							const radialForce = 12.0 * proximityFactor * ripple.alpha;
-
-							// Add tangential (orbital) force to create rotating ring
-							const tangentialAngle = radialAngle + Math.PI / 2; // Perpendicular for clockwise orbit
-							const orbitalForce = 8.0 * proximityFactor * ripple.alpha;
-
-							// Apply both radial and orbital forces
-							this.vx += radialForce * Math.cos(radialAngle) + orbitalForce * Math.cos(tangentialAngle);
-							this.vy += radialForce * Math.sin(radialAngle) + orbitalForce * Math.sin(tangentialAngle);
-						} else {
-							// BURST: Spectacular radial explosion outward from station
-							angle = Math.atan2(sdy, sdx); // Point away from station
-							// Add slight random variation for more organic burst
-							const variation = (Math.random() - 0.5) * 0.3;
-							angle += variation;
-							force = 60.0 * proximityFactor * ripple.alpha; // Much stronger burst
-
-							this.vx += force * Math.cos(angle);
-							this.vy += force * Math.sin(angle);
-						}
-					}
-				}
-			}
-		}
-
 		// Anomaly spiral vortex forces
 		for (let i = 0; i < anomalies.length; i++) {
 			const a = anomalies[i];
@@ -372,7 +221,6 @@ export class Particle {
 				let vortexStrength = baseStrength * falloff;
 
 				// Energy station vortex boost
-				const now = Date.now();
 				if (a.vortexBoostEndTime && now < a.vortexBoostEndTime) {
 					vortexStrength *= 1.5; // 50% stronger vortex
 				}
@@ -405,7 +253,19 @@ export class Particle {
 				this.vx += spiralForce * Math.cos(tangentialAngle);
 				this.vy += spiralForce * Math.sin(tangentialAngle);
 			}
-		}
+        }
+        
+        // Glyph capture stream
+        for (const glyph of state.glyphs) {
+            if (glyph.isCapturing && glyph.captureTarget) {
+                const tdx = glyph.captureTarget.x - this.x;
+                const tdy = glyph.captureTarget.y - this.y;
+                if (tdx * tdx + tdy * tdy < 150 * 150) {
+                    this.vx += tdx * 0.03;
+                    this.vy += tdy * 0.03;
+                }
+            }
+        }
 
 		this.vx *= CONFIG.PARTICLE_DRAG;
 		this.vy *= CONFIG.PARTICLE_DRAG;

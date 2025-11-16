@@ -231,18 +231,6 @@ class DebugPanel {
 				border-radius: 3px;
 				transition: transform 0.1s ease;
 			">+ Anomaly</button>
-			<button id="spawn-station-btn" style="
-				background: rgba(76, 175, 80, 0.3);
-				border: 1px solid #4CAF50;
-				color: #fff;
-				padding: 6px 12px;
-				margin: 4px;
-				cursor: pointer;
-				font-family: 'JetBrains Mono', monospace;
-				font-size: 11px;
-				border-radius: 3px;
-				transition: transform 0.1s ease;
-			">+ Station</button>
 		`;
 
 		// Create dynamic content container
@@ -333,7 +321,6 @@ class DebugPanel {
 		// Setup all spawn buttons
 		setupButton('#spawn-virus-btn', window.debugSpawnVirus, 'debugSpawnVirus');
 		setupButton('#spawn-anomaly-btn', window.debugSpawnAnomaly, 'debugSpawnAnomaly');
-		setupButton('#spawn-station-btn', window.debugSpawnStation, 'debugSpawnStation');
 	}
 
 	update(debugData) {
@@ -409,25 +396,6 @@ class DebugPanel {
 				`Vortex Strength: ${anomalies.vortexStrength}`,
 			];
 			html += this.section("ANOMALIES", anomalyInfo);
-		}
-
-		// Stations Section
-		if (stations.count > 0) {
-			const stationInfo = [
-				`Count: ${stations.count}`,
-				`Next spawn: ${stations.nextSpawn}`,
-			];
-
-			stations.list.forEach((s, idx) => {
-				stationInfo.push(`<div style="margin-top: 8px; padding: 8px; background: rgba(255, 255, 255, 0.05); border-left: 2px solid #fff;">
-					<strong>Station ${idx + 1}</strong><br>
-					Age: ${s.age}s / ${s.lifetime}s (${s.agePercent}%)<br>
-					Position: (${s.x}, ${s.y})<br>
-					Active ripples: ${s.rippleCount}<br>
-					Ripple interval: ${s.rippleInterval}ms
-				</div>`);
-			});
-			html += this.section("ENERGY STATIONS", stationInfo);
 		}
 
 		// Disruption Section

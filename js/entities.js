@@ -6,7 +6,7 @@ export function updateOutbreaks(state) {
     const {
         isMobile, activeParticleRatio, centerX, centerY, w, h, screenSizeMultiplier,
         cursorX, cursorY, disruptionTarget, disruptionSecondaryTarget, disruptionIntensity,
-        disruptionCenterX, disruptionCenterY, anomalies, cursorBuffs
+        disruptionCenterX, disruptionCenterY, anomalies, cursorBuffs, radiusMultiplier
     } = state;
 
 	const now = Date.now();
@@ -156,15 +156,15 @@ export function updateOutbreaks(state) {
 				baseDamage = state.isManual ? 0.8 : 0.4;
 			}
 
+            baseDamage *= radiusMultiplier;
+
 			// Scale damage down with more particles - cursor is much stronger with more particles
 			// At 0% particles: 100% damage, at 100% particles: 40% damage
 			const particleDamageMultiplier = 1.0 - activeParticleRatio * 0.6;
 			baseDamage *= particleDamageMultiplier;
 
-			// Energy station damage boost
-			let stationBonus = cursorBuffs.damageBoostActive ? 1.25 : 1.0;
-
 			// Black hole kill boost - massive damage increase!
+			let stationBonus = 1.0;
 			if (cursorBuffs.blackHoleKillBoostActive) {
 				stationBonus *= 2.5; // 2.5x damage multiplier
 			}
@@ -425,7 +425,7 @@ export function updateAnomalies(state) {
     const {
         isMobile, activeParticleRatio, centerX, centerY, w, h, outbreaks,
         cursorX, cursorY, disruptionTarget, disruptionIntensity, disruptionCenterX,
-        disruptionCenterY, cursorBuffs
+        disruptionCenterY, cursorBuffs, radiusMultiplier
     } = state;
 
 	const now = Date.now();
@@ -623,6 +623,10 @@ export function updateAnomalies(state) {
 			a.y = orbitY + anomalyPullY * 0.3;
 		}
 
+        if (a.vortexBoostEndTime && now < a.vortexBoostEndTime) {
+            a.vortexStrength *= 1.5;
+        }
+
 		// Damage from cursor
 		const dx = cursorX - a.x;
 		const dy = cursorY - a.y;
@@ -636,14 +640,14 @@ export function updateAnomalies(state) {
 		if (distToCursor < 40) {
 			let damage = state.isManual ? 2.0 : 1.0;
 
+            damage *= radiusMultiplier;
+
 			// Scale damage down with more particles - cursor is much stronger with more particles
 			const particleDamageMultiplier = 1.0 - activeParticleRatio * 0.6;
 			damage *= particleDamageMultiplier;
 
-			// Energy station damage boost
-			let stationBonus = cursorBuffs.damageBoostActive ? 1.25 : 1.0;
-
 			// Black hole kill boost - massive damage increase!
+			let stationBonus = 1.0;
 			if (cursorBuffs.blackHoleKillBoostActive) {
 				stationBonus *= 2.5; // 2.5x damage multiplier
 			}
@@ -664,167 +668,548 @@ export function updateAnomalies(state) {
 			a.health -= damage * disruptionBonus * stationBonus;
 		}
 
-		return a.health > 0 && a.frame < 18000; // Live for max 5 minutes
-	});
-}
+		                                return a.health > 0 && a.frame < 18000; // Live for max 5 minutes
 
-export function updateStations(state) {
-    const {
-        activeParticleRatio, centerX, centerY, w, h, isManual, cursorX, cursorY,
-        outbreaks, anomalies, cursorBuffs
-    } = state;
+		                        	});
 
-	const now = Date.now();
+		                        }
 
-	// Spawn stations rarely (max 2 at a time for performance)
-	if (
-		now >= state.nextStationTime &&
-		activeParticleRatio > 0.25 &&
-		state.stations.length < 2
-	) {
-		const angle = Math.random() * Math.PI * 2;
-		const distance = (0.25 + Math.random() * 0.25) * Math.min(w, h);
+		                        
 
-		// Random drift direction
-		const driftAngle = Math.random() * Math.PI * 2;
+		                        export function updateGlyphs(state) {
 
-		state.stations.push({
-			x: centerX + Math.cos(angle) * distance,
-			y: centerY + Math.sin(angle) * distance,
-			driftAngle: driftAngle,
-			frame: 0,
-			spawnTime: now,
-			captured: false,
-			ripples: [], // Active ripple waves
-			nextRippleTime: now + 3000, // First ripple after 3 seconds
-		});
+		                        
 
-		const spawnInterval =
-			CONFIG.STATION_SPAWN_MIN +
-			Math.random() * (CONFIG.STATION_SPAWN_MAX - CONFIG.STATION_SPAWN_MIN);
-		state.nextStationTime = now + spawnInterval;
-	}
+		                            const { w, h, outbreaks, anomalies, activeParticleRatio } = state;
 
-	// Update stations
-	state.stations = state.stations.filter((s) => {
-		s.frame++;
-		const age = now - s.spawnTime;
+		                        
 
-		// Despawn if too old
-		if (age > CONFIG.STATION_LIFETIME) return false;
+		                            const now = Date.now();
 
-		// Drift slowly
-		s.x += Math.cos(s.driftAngle) * CONFIG.STATION_DRIFT_SPEED;
-		s.y += Math.sin(s.driftAngle) * CONFIG.STATION_DRIFT_SPEED;
+		                        
 
-		// Bounce off edges
-		if (s.x < 50 || s.x > w - 50) {
-			s.driftAngle = Math.PI - s.driftAngle;
-		}
-		if (s.y < 50 || s.y > h - 50) {
-			s.driftAngle = -s.driftAngle;
-		}
+		                        
 
-		// Update ripples - slow charging cycle with burst
-		const lifeRatio = 1.0 - age / CONFIG.STATION_LIFETIME;
-		s.ripples = s.ripples.filter((ripple) => {
-			const rippleAge = now - ripple.birthTime;
-			const rippleLifespan = 15000; // 15 second cycle (slower)
-			const ripplePhase = rippleAge / rippleLifespan;
+		                        
 
-			// Charging phase (0-80%): Slow expansion, pulling particles in
-			// Burst phase (80-100%): Fast expansion, pushing particles out
-			if (ripplePhase < 0.80) {
-				// Charging: expand slowly
-				ripple.radius += 1.2;
-				ripple.isCharging = true;
-			} else {
-				// Burst: expand quickly
-				ripple.radius += 6.0;
-				ripple.isCharging = false;
-			}
+		                                // Spawn new glyph
 
-			ripple.alpha = 1.0 - ripplePhase; // Fade over full cycle
-			return ripplePhase < 1.0 && ripple.radius < 400;
-		});
+		                        
 
-		// Spawn new ripple cycle - slower intervals, speeds up as station ages
-		const baseInterval = 15000; // 15 seconds base (more time between bursts)
-		const rippleInterval = baseInterval - (1.0 - lifeRatio) * 8000; // 15s -> 7s
-		if (now >= s.nextRippleTime) {
-			s.ripples.push({
-				radius: 0,
-				speed: 1.5,
-				alpha: 1.0,
-				birthTime: now,
-				isCharging: true,
-			});
-			s.nextRippleTime = now + rippleInterval;
-		}
+		                        
 
-		// Check cursor capture - only when manually controlled
-		if (isManual) {
-			const dxCursor = cursorX - s.x;
-			const dyCursor = cursorY - s.y;
-			const distCursor = Math.sqrt(dxCursor * dxCursor + dyCursor * dyCursor);
+		                        
 
-			if (distCursor < CONFIG.STATION_CAPTURE_RADIUS) {
-				// Cursor captures station - apply random buff
-				if (Math.random() < 0.5) {
-					// Shield buff
-					cursorBuffs.shieldActive = true;
-					cursorBuffs.shieldEndTime = now + 10000; // 10 seconds
-				} else {
-					// Damage boost
-					cursorBuffs.damageBoostActive = true;
-					cursorBuffs.damageBoostEndTime = now + 10000; // 10 seconds
-				}
-				return false; // Remove station
-			}
-		}
+		                                if (state.glyphs.length === 0 && now >= state.nextGlyphSpawnTime && activeParticleRatio > 0.2) {
 
-		// Check virus capture
-		for (let i = 0; i < outbreaks.length; i++) {
-			const v = outbreaks[i];
-			const dx = v.x - s.x;
-			const dy = v.y - s.y;
-			const dist = Math.sqrt(dx * dx + dy * dy);
+		                        
 
-			if (dist < CONFIG.STATION_CAPTURE_RADIUS + v.radius * 0.5) {
-				// Virus captures station - apply regen boost
-				v.regenBoostEndTime = now + 15000; // 15 seconds of boosted regen
-				return false; // Remove station
-			}
-		}
+		                        
 
-		// Check anomaly capture
-		for (let i = 0; i < anomalies.length; i++) {
-			const a = anomalies[i];
-			const dx = a.x - s.x;
-			const dy = a.y - s.y;
-			const dist = Math.sqrt(dx * dx + dy * dy);
+		                        
 
-			if (dist < CONFIG.STATION_CAPTURE_RADIUS) {
-				// Anomaly captures station - apply vortex boost
-				a.vortexBoostEndTime = now + 12000; // 12 seconds of boosted vortex
-				return false; // Remove station
-			}
-		}
+		                                    let spawnX, spawnY;
 
-		return true; // Keep station
-	});
+		                        
 
-	// Update cursor buffs expiration
-	if (cursorBuffs.shieldActive && now > cursorBuffs.shieldEndTime) {
-		cursorBuffs.shieldActive = false;
-	}
-	if (cursorBuffs.damageBoostActive && now > cursorBuffs.damageBoostEndTime) {
-		cursorBuffs.damageBoostActive = false;
-	}
-	if (
-		cursorBuffs.blackHoleKillBoostActive &&
-		now > cursorBuffs.blackHoleKillBoostEndTime
-	) {
-		cursorBuffs.blackHoleKillBoostActive = false;
-	}
-}
+		                        
+
+		                        
+
+		                                    let isSafe = false;
+
+		                        
+
+		                        
+
+		                        
+
+		                                    const maxAttempts = 10;
+
+		                        
+
+		                        
+
+		                        
+
+		                                    let attempts = 0;
+
+		                        
+
+		                        
+
+		                        
+
+		                            
+
+		                        
+
+		                        
+
+		                        
+
+		                                    while (!isSafe && attempts < maxAttempts) {
+
+		                        
+
+		                        
+
+		                        
+
+		                                        attempts++;
+
+		                        
+
+		                        
+
+		                        
+
+		                                        isSafe = true;
+
+		                        
+
+		                        
+
+		                        
+
+		                                        spawnX = w * 0.2 + Math.random() * w * 0.6;
+
+		                        
+
+		                        
+
+		                        
+
+		                                        spawnY = h * 0.2 + Math.random() * h * 0.6;
+
+		                        
+
+		                        
+
+		                        
+
+		                            
+
+		                        
+
+		                        
+
+		                        
+
+		                                        for (const o of outbreaks) {
+
+		                        
+
+		                        
+
+		                        
+
+		                                            const dx = o.x - spawnX;
+
+		                        
+
+		                        
+
+		                        
+
+		                                            const dy = o.y - spawnY;
+
+		                        
+
+		                        
+
+		                        
+
+		                                            const distSq = dx * dx + dy * dy;
+
+		                        
+
+		                        
+
+		                        
+
+		                                            const safeDist = o.radius + CONFIG.GLYPH_CAPTURE_RADIUS + 50; // 50px buffer
+
+		                        
+
+		                        
+
+		                        
+
+		                            
+
+		                        
+
+		                        
+
+		                        
+
+		                                            if (distSq < safeDist * safeDist) {
+
+		                        
+
+		                        
+
+		                        
+
+		                                                isSafe = false;
+
+		                        
+
+		                        
+
+		                        
+
+		                                                break; // Unsafe, try new coordinates
+
+		                        
+
+		                        
+
+		                        
+
+		                                            }
+
+		                        
+
+		                        
+
+		                        
+
+		                                        }
+
+		                        
+
+		                        
+
+		                        
+
+		                                    }
+
+		                        
+
+		                        
+
+		                        
+
+		                            
+
+		                        
+
+		                        
+
+		                        
+
+		                                    if (isSafe) {
+
+		                        
+
+		                        
+
+		                        
+
+		                                        state.glyphs.push({
+
+		                        
+
+		                        
+
+		                        
+
+		                                            x: spawnX,
+
+		                        
+
+		                        
+
+		                        
+
+		                                            y: spawnY,
+
+		                        
+
+		                        
+
+		                        
+
+		                                            spawnTime: now,
+
+		                        
+
+		                        
+
+		                        
+
+		                                            isCapturing: false,
+
+		                        
+
+		                        
+
+		                        
+
+		                                            captureTarget: null,
+
+		                        
+
+		                        
+
+		                        
+
+		                                            captureTime: 0,
+
+		                        
+
+		                        
+
+		                        
+
+		                                        });
+
+		                        
+
+		                        
+
+		                        
+
+		                                    } else {
+
+		                        
+
+		                        
+
+		                        
+
+		                                        // If no safe spot found after max attempts, just delay the next spawn
+
+		                        
+
+		                        
+
+		                        
+
+		                                        state.nextGlyphSpawnTime = now + 5000; // Try again in 5 seconds
+
+		                        
+
+		                        
+
+		                        
+
+		                                    }
+
+		                        
+
+		                        
+
+		                        
+
+		                                }
+
+		                        
+
+		                        
+
+		                        
+
+		                            state.glyphs = state.glyphs.filter(glyph => {
+
+		                        
+
+		                                const age = now - glyph.spawnTime;
+
+		                        
+
+		                                if (age > CONFIG.GLYPH_LIFETIME && !glyph.isCapturing) {
+
+		                        
+
+		                                    state.nextGlyphSpawnTime = now + CONFIG.GLYPH_SPAWN_MIN + Math.random() * (CONFIG.GLYPH_SPAWN_MAX - CONFIG.GLYPH_SPAWN_MIN);
+
+		                        
+
+		                                    return false; // Despawn if too old
+
+		                        
+
+		                                }
+
+		                        
+
+		                        
+
+		                        
+
+		                                if (glyph.isCapturing) {
+
+		                        
+
+		                                    glyph.captureTime -= 16.67;
+
+		                        
+
+		                                    if (glyph.captureTime <= 0) {
+
+		                        
+
+		                                        if (glyph.captureTarget) {
+
+		                        
+
+		                                            if (outbreaks.includes(glyph.captureTarget)) {
+
+		                        
+
+		                                                glyph.captureTarget.regenBoostEndTime = Date.now() + 15000;
+
+		                        
+
+		                                            } else if (anomalies.includes(glyph.captureTarget)) {
+
+		                        
+
+		                                                glyph.captureTarget.vortexBoostEndTime = Date.now() + 12000;
+
+		                        
+
+		                                            }
+
+		                        
+
+		                                        }
+
+		                        
+
+		                                        state.nextGlyphSpawnTime = now + CONFIG.GLYPH_SPAWN_MIN + Math.random() * (CONFIG.GLYPH_SPAWN_MAX - CONFIG.GLYPH_SPAWN_MIN);
+
+		                        
+
+		                                        return false;
+
+		                        
+
+		                                    }
+
+		                        
+
+		                                    return true;
+
+		                        
+
+		                                }
+
+		                        
+
+		                        
+
+		                        
+
+		                                // Check for capture by viruses
+
+		                        
+
+		                                for (const v of outbreaks) {
+
+		                        
+
+		                                    const dx = v.x - glyph.x;
+
+		                        
+
+		                                    const dy = v.y - glyph.y;
+
+		                        
+
+		                                    if (dx * dx + dy * dy < (CONFIG.GLYPH_CAPTURE_RADIUS + v.radius) ** 2) {
+
+		                        
+
+		                                        glyph.isCapturing = true;
+
+		                        
+
+		                                        glyph.captureTarget = v;
+
+		                        
+
+		                                        glyph.captureTime = 1000;
+
+		                        
+
+		                                        return true;
+
+		                        
+
+		                                    }
+
+		                        
+
+		                                }
+
+		                        
+
+		                        
+
+		                        
+
+		                                // Check for capture by anomalies
+
+		                        
+
+		                                for (const a of anomalies) {
+
+		                        
+
+		                                    const dx = a.x - glyph.x;
+
+		                        
+
+		                                    const dy = a.y - glyph.y;
+
+		                        
+
+		                                    if (dx * dx + dy * dy < CONFIG.GLYPH_CAPTURE_RADIUS ** 2) {
+
+		                        
+
+		                                        glyph.isCapturing = true;
+
+		                        
+
+		                                        glyph.captureTarget = a;
+
+		                        
+
+		                                        glyph.captureTime = 1000;
+
+		                        
+
+		                                        return true;
+
+		                        
+
+		                                    }
+
+		                        
+
+		                                }
+
+		                        
+
+		                        
+
+		                        
+
+		                                return true;
+
+		                        
+
+		                            });
+
+		                        
+
+		                        }
+
+		        
+
+		

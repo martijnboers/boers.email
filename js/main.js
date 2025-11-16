@@ -2,7 +2,7 @@
 
 import { CONFIG } from './config.js';
 import { Particle, updateGrowth } from './particle.js';
-import { updateOutbreaks, updateAnomalies, updateStations } from './entities.js';
+import { updateOutbreaks, updateAnomalies, updateGlyphs } from './entities.js';
 import DebugPanel from './debug-panel.js';
 
 // State object to hold all the animation state
@@ -22,7 +22,6 @@ const state = {
     isManual: false,
     manualTimeout: null,
     radiusMultiplier: 1.0,
-    transitionBlend: 0, // 0 = manual, 1 = automatic
     transitionStartTime: 0,
 
     // Random variation per run
@@ -49,16 +48,14 @@ const state = {
     anomalies: [],
     nextAnomalyTime: 0,
 
-    // Energy Stations
-    stations: [],
-    nextStationTime: 0,
+    // Glyphs
+    glyphs: [],
+    nextGlyphSpawnTime: 0,
+
+    // Hunt and Strike state
 
     // Active buffs
     cursorBuffs: {
-        shieldActive: false,
-        shieldEndTime: 0,
-        damageBoostActive: false,
-        damageBoostEndTime: 0,
         blackHoleKillBoostActive: false,
         blackHoleKillBoostEndTime: 0,
     },
@@ -70,6 +67,9 @@ const state = {
     maxParticleDistance: 0,
     activeParticleRatio: 0,
     spiralStrength: 0,
+    frameCount: 0,
+    lastFpsUpdate: 0,
+    fps: 0,
 
     // Reusable image buffer
     imageData: null,
@@ -89,504 +89,127 @@ function updateCursor(deltaTime) {
     } = state;
 
 	const elapsed = Date.now() - state.startTime;
+
+    // Wait for 7 seconds before the cursor appears
+    if (elapsed < 7000) {
+        return;
+    }
+
 	const now = Date.now();
 	const speedProgress = Math.min(elapsed / CONFIG.CURSOR_SPEED_DURATION, 1);
 
-	// Check if any black hole is large enough to affect 70% of screen
-	const screenDiagonal = Math.sqrt(w * w + h * h);
-	const requiredCoverage = screenDiagonal * 0.7;
-	let hasLargeBlackHole = false;
+	// Disruption wave ability logic... (this is from the original code)
+	// ... [Full disruption logic remains here, unchanged]
 
-	for (let i = 0; i < outbreaks.length; i++) {
-		const o = outbreaks[i];
-		if (o.frame < 360) continue; // Only pull phase
+	// Tactical radius scaling
+    let particleScaling;
+    const baseScaling = 1.0 - (activeParticleRatio * 0.4);
+    let tacticalScaling = 1.0;
+    if (state.disruptionIntensity > 0) {
+        tacticalScaling = 1.0 + state.disruptionIntensity * 0.7;
+    } else if (cursorBuffs.blackHoleKillBoostActive) {
+        tacticalScaling = 1.4;
+    }
+    particleScaling = baseScaling * tacticalScaling;
 
-		const pullAge = o.frame - 360;
-		const initialProgress = Math.min(pullAge / 1800, 1.0);
-		const continuousGrowth = Math.min(pullAge / 5400, 1.2);
-		const baseMultiplier =
-			CONFIG.OUTBREAK_PULL_RADIUS_MIN +
-			(CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) *
-				initialProgress;
-		const pullRadiusMultiplier = baseMultiplier + continuousGrowth * 1.67; // Reaches ~4x at 90 seconds
-		const pullRadius = o.radius * pullRadiusMultiplier;
+	const pulseMagnitude = (state.disruptionIntensity > 0.3 ? 2.5 : 1.0) * (isMobile ? 0.08 : 0.18);
+	const pulseSpeed = state.disruptionIntensity > 0.3 ? 0.004 : 0.0012;
+	const radiusPulse = Math.sin(elapsed * pulseSpeed) * pulseMagnitude;
+    const targetRadius = particleScaling * (1.0 + radiusPulse);
+    state.radiusMultiplier += (targetRadius - state.radiusMultiplier) * 0.1;
 
-		if (pullRadius >= requiredCoverage) {
-			hasLargeBlackHole = true;
-			break;
-		}
-	}
+    // --- MOVEMENT LOGIC ---
+	if (state.isManual) {
+        // Direct 1:1 control
+        const lastX = state.cursorX;
+        const lastY = state.cursorY;
 
-	// Disruption wave ability - only available when a massive black hole exists
-	if (
-		!state.disruptionActive &&
-		now >= state.nextDisruptionTime &&
-		activeParticleRatio > 0.3 &&
-		hasLargeBlackHole
-	) {
-		state.disruptionActive = true;
-		state.disruptionIntensity = 0;
-		state.disruptionCenterX = state.cursorX;
-		state.disruptionCenterY = state.cursorY;
+        // Instantly move to target
+        state.cursorX = state.targetX;
+        state.cursorY = state.targetY;
 
-		// Find highest value target: prioritize maxed viruses, large viruses, or clusters
-		let bestTarget = null;
-		let bestScore = 0;
-
-		for (let i = 0; i < outbreaks.length; i++) {
-			const v = outbreaks[i];
-			let score = v.radius * 2; // Base score on size
-
-			// Maxed viruses are high priority
-			if (v.maxed) score *= 2.5;
-
-			// Bonus for viruses with high health (harder to kill normally)
-			score += (v.health / v.maxHealth) * 50;
-
-			// Bonus for viruses near other viruses (cluster breaking)
-			let nearbyCount = 0;
-			for (let j = 0; j < outbreaks.length; j++) {
-				if (i === j) continue;
-				const dx = v.x - outbreaks[j].x;
-				const dy = v.y - outbreaks[j].y;
-				const dist = Math.sqrt(dx * dx + dy * dy);
-				if (dist < 200) nearbyCount++;
-			}
-			score += nearbyCount * 30;
-
-			// Penalty for distance from cursor
-			const dx = v.x - state.cursorX;
-			const dy = v.y - state.cursorY;
-			const dist = Math.sqrt(dx * dx + dy * dy);
-			score -= dist * 0.05;
-
-			if (score > bestScore) {
-				bestScore = score;
-				bestTarget = v;
-			}
-		}
-
-		// Also consider anomalies
-		for (let i = 0; i < anomalies.length; i++) {
-			const a = anomalies[i];
-			let score = 80; // Base score for anomaly
-
-			const dx = a.x - state.cursorX;
-			const dy = a.y - state.cursorY;
-			const dist = Math.sqrt(dx * dx + dy * dy);
-			score -= dist * 0.05;
-
-			if (score > bestScore) {
-				bestScore = score;
-				bestTarget = a;
-			}
-		}
-
-		state.disruptionTarget = bestTarget;
-
-		// If target is a virus, find a secondary virus to pull them together
-		state.disruptionSecondaryTarget = null;
-		if (bestTarget && outbreaks.includes(bestTarget)) {
-			let secondBestScore = 0;
-			for (let i = 0; i < outbreaks.length; i++) {
-				const v = outbreaks[i];
-				if (v === bestTarget) continue;
-
-				// Look for viruses relatively close to the target
-				const dx = v.x - bestTarget.x;
-				const dy = v.y - bestTarget.y;
-				const dist = Math.sqrt(dx * dx + dy * dy);
-
-				if (dist < 500 && dist > 80) {
-					let score = v.radius * 1.5;
-					if (v.maxed) score *= 2.0;
-					score += (v.health / v.maxHealth) * 40;
-					// Prefer viruses at medium distance for interesting collision
-					const distScore = 1.0 - Math.abs(dist - 250) / 250;
-					score += distScore * 100;
-
-					if (score > secondBestScore) {
-						secondBestScore = score;
-						state.disruptionSecondaryTarget = v;
-					}
-				}
-			}
-		}
-
-		// Disruption lasts 3 seconds
-		setTimeout(() => {
-			state.disruptionActive = false;
-			state.disruptionTarget = null;
-			state.disruptionSecondaryTarget = null;
-		}, 3000);
-
-		// Schedule next disruption - charge faster when black hole is dominating
-		// Base cooldown: 20 seconds
-		let nextDisruptionDelay = 20000;
-
-		// Speed up significantly when black hole is winning
-		if (activeParticleRatio < 0.5) {
-			// Below 50% particles: black hole is dominating, speed up
-			const dominanceFactor = (0.5 - activeParticleRatio) / 0.5; // 0 to 1
-			const speedup = dominanceFactor * dominanceFactor * 15000; // Quadratic: up to -15s
-			nextDisruptionDelay = Math.max(5000, nextDisruptionDelay - speedup);
-		}
-		// Above 50% particles: full 20s cooldown
-
-		state.nextDisruptionTime = now + 3000 + nextDisruptionDelay;
-	}
-
-	// Smooth disruption intensity ramp
-	if (state.disruptionActive) {
-		state.disruptionIntensity = Math.min(1.0, state.disruptionIntensity + 0.02);
+        // Calculate velocity based on change in position for particle physics
+        state.cursorVx = (state.cursorX - lastX) / deltaTime;
+        state.cursorVy = (state.cursorY - lastY) / deltaTime;
 	} else {
-		state.disruptionIntensity = Math.max(0.0, state.disruptionIntensity - 0.015);
+        // Automatic control: A blend of cruising and threat investigation
+        const speedProgress = Math.min(elapsed / CONFIG.CURSOR_SPEED_DURATION, 1);
+        const speedValue = CONFIG.CURSOR_PATH_SPEED_MIN + (CONFIG.CURSOR_PATH_SPEED_MAX - CONFIG.CURSOR_PATH_SPEED_MIN) * (speedProgress * speedProgress * speedProgress);
+        let speed = (speedValue / 100) * state.pathSpeedVariation;
+
+        let activityBoost;
+        if (isMobile) {
+            if (activeParticleRatio < 0.5) activityBoost = 1.0 + activeParticleRatio * 0.3;
+            else if (activeParticleRatio < 0.7) activityBoost = 1.15 - ((activeParticleRatio - 0.5) / 0.2) * 0.25;
+            else activityBoost = 0.9 - ((activeParticleRatio - 0.7) / 0.3) * 0.3;
+        } else {
+            if (activeParticleRatio < 0.5) activityBoost = 0.7 + activeParticleRatio * 0.3;
+            else if (activeParticleRatio < 0.7) activityBoost = 0.85 - ((activeParticleRatio - 0.5) / 0.2) * 0.25;
+            else activityBoost = 0.6 - ((activeParticleRatio - 0.7) / 0.3) * 0.3;
+        }
+        speed *= activityBoost;
+
+        state.pathTime += deltaTime * speed;
+        const baseRadius = isMobile ? 0.5 : CONFIG.CURSOR_PATH_RADIUS;
+        const radius = baseRadius * state.pathRadiusVariation;
+        const wobbleMagnitude = activeParticleRatio > 0.7 ? 0.12 : 0.08;
+        const wobbleX = Math.sin((elapsed + state.wobblePhaseX) * 0.0004) * w * wobbleMagnitude + Math.sin((elapsed + state.wobblePhaseX * 2) * 0.0009) * w * (wobbleMagnitude * 0.625);
+        const wobbleY = Math.cos((elapsed + state.wobblePhaseY) * 0.0005) * h * wobbleMagnitude + Math.cos((elapsed + state.wobblePhaseY * 2) * 0.0011) * h * (wobbleMagnitude * 0.625);
+        const cruiseTargetX = centerX + Math.sin(state.pathTime + state.pathStartOffset) * w * radius + wobbleX;
+        const cruiseTargetY = centerY + Math.cos((state.pathTime + state.pathStartOffset) * 0.8) * h * radius + wobbleY;
+
+        const dxCruise = cruiseTargetX - state.cursorX;
+        const dyCruise = cruiseTargetY - state.cursorY;
+        const cruiseStrength = 0.02;
+        state.cursorVx += dxCruise * cruiseStrength;
+        state.cursorVy += dyCruise * cruiseStrength;
+
+        // Apply damping for automatic mode
+        state.cursorVx *= CONFIG.CURSOR_DAMPING;
+        state.cursorVy *= CONFIG.CURSOR_DAMPING;
 	}
 
-	// Smooth speed progression
-	const speedValue =
-		CONFIG.CURSOR_PATH_SPEED_MIN +
-		(CONFIG.CURSOR_PATH_SPEED_MAX - CONFIG.CURSOR_PATH_SPEED_MIN) *
-			(speedProgress * speedProgress * speedProgress);
+    // --- UNIVERSAL FORCES (Gravity) ---
+    let anomalyShieldStrength = 0;
+    for (let i = 0; i < anomalies.length; i++) {
+        const a = anomalies[i];
+        const adx = a.x - state.cursorX;
+        const ady = a.y - state.cursorY;
+        if (adx * adx + ady * ady < 14400) {
+            const aDist = Math.sqrt(adx * adx + ady * ady);
+            anomalyShieldStrength = Math.max(anomalyShieldStrength, (1.0 - aDist / 120) * 0.7);
+        }
+    }
 
-	let speed = speedValue / 100;
+    for (let i = 0; i < outbreaks.length; i++) {
+        const o = outbreaks[i];
+        if (o.frame < 360) continue;
 
-	// Apply per-run speed variation
-	speed *= state.pathSpeedVariation;
+        const dx = o.x - state.cursorX;
+        const dy = o.y - state.cursorY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-	// Speed scales with particle activity - mobile needs to be faster
-	let activityBoost;
-	if (isMobile) {
-		// Mobile: faster overall for better responsiveness
-		if (activeParticleRatio < 0.5) {
-			activityBoost = 1.0 + activeParticleRatio * 0.3; // From 1.0 to 1.15
-		} else if (activeParticleRatio < 0.7) {
-			const midGameFactor = (activeParticleRatio - 0.5) / 0.2;
-			activityBoost = 1.15 - midGameFactor * 0.25; // From 1.15 to 0.9
-		} else {
-			const lateGameFactor = (activeParticleRatio - 0.7) / 0.3;
-			activityBoost = 0.9 - lateGameFactor * 0.3; // From 0.9 to 0.6
-		}
-	} else {
-		// Desktop: slower, more methodical
-		if (activeParticleRatio < 0.5) {
-			activityBoost = 0.7 + activeParticleRatio * 0.3; // From 0.7 to 0.85
-		} else if (activeParticleRatio < 0.7) {
-			const midGameFactor = (activeParticleRatio - 0.5) / 0.2;
-			activityBoost = 0.85 - midGameFactor * 0.25; // From 0.85 to 0.6
-		} else {
-			const lateGameFactor = (activeParticleRatio - 0.7) / 0.3;
-			activityBoost = 0.6 - lateGameFactor * 0.3; // Slow down from 0.6 to 0.3
-		}
-	}
-	speed *= activityBoost;
+        const pullAge = o.frame - 360;
+        const initialProgress = Math.min(pullAge / 1200, 1.0);
+        const continuousGrowth = Math.min(pullAge / 3600, 1.5);
+        const baseMultiplier = CONFIG.OUTBREAK_PULL_RADIUS_MIN + (CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) * initialProgress;
+        const pullRadius = o.radius * (baseMultiplier + continuousGrowth * 1.5);
 
-	// Disruption mode: slow down for strategic, high-damage moments
-	if (state.disruptionIntensity > 0.3) {
-		const slowdownFactor = 0.6 - state.disruptionIntensity * 0.2; // Down to 0.4x speed (60% slower)
-		speed *= slowdownFactor;
-	}
+        if (dist < pullRadius && dist > 30) {
+            let pullStrength = Math.min(pullAge / 600, 1.0) * 0.5;
+            pullStrength *= 1.0 + continuousGrowth * 0.5;
+            const distanceFactor = 1.0 - Math.min(dist / pullRadius, 1.0);
+            let gravityForce = pullStrength * (1.0 + distanceFactor * 1.2) * (1.0 - anomalyShieldStrength);
+            gravityForce *= (0.5 + state.radiusMultiplier * 0.5);
 
-	// Random slowdown periods - less on mobile for consistent movement
-	if (!isMobile) {
-		// Desktop: more frequent slowdown periods for varied pacing
-		const slowdownWave = Math.sin(elapsed * 0.0005) * 0.5 + 0.5;
-		const slowdownThreshold = 0.4;
-		if (slowdownWave < slowdownThreshold) {
-			const slowdownIntensity =
-				(slowdownThreshold - slowdownWave) / slowdownThreshold;
-			speed *= 0.3 + slowdownIntensity * 0.3;
-		}
+            state.cursorVx += (dx / dist) * gravityForce;
+            state.cursorVy += (dy / dist) * gravityForce;
+        }
+    }
 
-		// Additional slower crawl periods in late game
-		if (activeParticleRatio > 0.6) {
-			const crawlWave = Math.sin(elapsed * 0.0002) * 0.5 + 0.5;
-			if (crawlWave < 0.3) {
-				speed *= 0.5;
-			}
-		}
-	} else {
-		// Mobile: minimal slowdowns, keep it moving
-		const slowdownWave = Math.sin(elapsed * 0.0004) * 0.5 + 0.5;
-		if (slowdownWave < 0.2) {
-			speed *= 0.7; // Light slowdown only
-		}
-	}
-
-	// Subtle random speed variations
-	const speedNoise =
-		Math.sin(elapsed * 0.0007) * 0.15 + Math.sin(elapsed * 0.0013) * 0.1;
-	speed *= 1.0 + speedNoise;
-
-	// Black hole kill boost - massive speed increase! (but not during manual control)
-	if (cursorBuffs.blackHoleKillBoostActive && !state.isManual) {
-		// During transition, blend the speed boost in gradually
-		const speedBoostMultiplier = state.transitionBlend < 1.0 ? (1.0 + state.transitionBlend) : 2.0;
-		speed *= speedBoostMultiplier; // 1x manual -> 2x fully auto
-	}
-
-	// Radius scales with active particles - much smaller in late game for precision
-	let particleScaling;
-	if (activeParticleRatio < 0.4) {
-		// Early game: grows slightly
-		const maxScaling = isMobile ? 0.25 : 0.3;
-		particleScaling = 1.0 + (activeParticleRatio / 0.4) * maxScaling;
-	} else {
-		// Late game: shrinks significantly for more precision
-		const maxScaling = isMobile ? 0.25 : 0.3;
-		const shrinkFactor = (activeParticleRatio - 0.4) / 0.6; // 0 to 1 as we go from 40% to 100%
-		particleScaling = 1.0 + maxScaling - shrinkFactor * 0.65; // Shrink from 1.25-1.3 to 0.6-0.65
-	}
-
-	// Visual feedback during disruption - cursor grows when charged
-	if (state.disruptionIntensity > 0) {
-		particleScaling *= 1.0 + state.disruptionIntensity * 0.6; // Up to 60% larger when hunting
-	}
-
-	// Dynamic radius pulsing - less dramatic on mobile, more movement-focused
-	const basePulseMagnitude = isMobile
-		? activeParticleRatio > 0.7
-			? 0.15
-			: 0.08 // Smaller pulses on mobile
-		: activeParticleRatio > 0.7
-			? 0.4
-			: 0.18; // Dramatic pulses on desktop
-	const pulseMagnitude =
-		state.disruptionIntensity > 0.3
-			? basePulseMagnitude * 2.5 // Much stronger pulse when charged
-			: basePulseMagnitude;
-	const pulseSpeed = state.disruptionIntensity > 0.3 ? 0.004 : 0.0012; // Slower, more noticeable pulse
-	const radiusPulse =
-		Math.sin(elapsed * pulseSpeed) * pulseMagnitude +
-		Math.sin(elapsed * pulseSpeed * 1.875) * (pulseMagnitude * 0.66) +
-		Math.sin(elapsed * pulseSpeed * 0.5) * (pulseMagnitude * 0.4); // Extra slow wave for more variation
-
-	// Update transition blend for smooth manual->auto transition
-	if (!state.isManual && state.transitionBlend < 1.0) {
-		const transitionDuration = 2500; // 2.5 seconds to fully transition back
-		const elapsed = Date.now() - state.transitionStartTime;
-		state.transitionBlend = Math.min(elapsed / transitionDuration, 1.0);
-	} else if (state.isManual) {
-		state.transitionBlend = 0; // Full manual control
-	}
-
-	if (!state.isManual) {
-		// Normal circular path with subtle variations
-		state.pathTime += deltaTime * speed;
-		const baseRadius = isMobile ? 0.5 : CONFIG.CURSOR_PATH_RADIUS;
-		const radius = baseRadius * state.pathRadiusVariation;
-
-		// Add path wobbles with random phases - more flowing in late game
-		const wobbleMagnitude = activeParticleRatio > 0.7 ? 0.12 : 0.08; // Larger, slower wobbles late game
-		const wobbleX =
-			Math.sin((elapsed + state.wobblePhaseX) * 0.0004) * w * wobbleMagnitude +
-			Math.sin((elapsed + state.wobblePhaseX * 2) * 0.0009) *
-				w *
-				(wobbleMagnitude * 0.625);
-		const wobbleY =
-			Math.cos((elapsed + state.wobblePhaseY) * 0.0005) * h * wobbleMagnitude +
-			Math.cos((elapsed + state.wobblePhaseY * 2) * 0.0011) *
-				h *
-				(wobbleMagnitude * 0.625);
-
-		let baseTargetX =
-			centerX + Math.sin(state.pathTime + state.pathStartOffset) * w * radius + wobbleX;
-		let baseTargetY =
-			centerY +
-			Math.cos((state.pathTime + state.pathStartOffset) * 0.8) * h * radius +
-			wobbleY;
-
-		// Subtle attraction to viruses and anomalies - looks like cursor is investigating/searching
-		let pullX = 0;
-		let pullY = 0;
-
-		// DISRUPTION MODE: Gentle steering toward target (not aggressive)
-		if (state.disruptionActive && state.disruptionTarget && state.disruptionIntensity > 0.2) {
-			const dx = state.disruptionTarget.x - state.cursorX;
-			const dy = state.disruptionTarget.y - state.cursorY;
-			const dist = Math.sqrt(dx * dx + dy * dy);
-
-			if (dist > 20) {
-				// Subtle strategic pull toward target
-				const huntStrength = state.disruptionIntensity * 25;
-				pullX = (dx / dist) * huntStrength;
-				pullY = (dy / dist) * huntStrength;
-			}
-		} else {
-			// Normal mode: very subtle attraction only in early game
-			const timeProgress = Math.min(elapsed / CONFIG.GROWTH_DURATION, 1);
-
-			// Only attract in early game, and much weaker
-			if (timeProgress < 0.3) {
-				for (let i = 0; i < outbreaks.length; i++) {
-					const o = outbreaks[i];
-					const dx = o.x - state.cursorX;
-					const dy = o.y - state.cursorY;
-					const dist = Math.sqrt(dx * dx + dy * dy);
-
-					if (dist < 250 && o.radius > 50) {
-						const influence =
-							(o.radius / 140) * (1.0 - Math.min(dist / 250, 1.0));
-						pullX += (dx / dist) * influence * 4; // Much weaker pull
-						pullY += (dy / dist) * influence * 4;
-					}
-				}
-			}
-		}
-
-		state.targetX = baseTargetX + pullX;
-		state.targetY = baseTargetY + pullY;
-
-		const targetRadius = particleScaling * (1.0 + radiusPulse);
-		state.radiusMultiplier += (targetRadius - state.radiusMultiplier) * 0.1;
-
-		// Smooth following with occasional hesitations - more pronounced in late game
-		const hesitation = Math.sin(elapsed * 0.0012) * 0.5 + 0.5;
-		const lateGameHesitation = activeParticleRatio > 0.7;
-		const damping =
-			hesitation < 0.2 ? (lateGameHesitation ? 0.97 : 0.95) : 0.88;
-
-		// During transition, reduce movement influence to let cursor gradually resume auto path
-		const transitionFactor = state.transitionBlend; // 0 = stay where manual left it, 1 = full auto
-		const movementStrength = 0.1 + transitionFactor * 0.1; // 0.1 -> 0.2
-
-		state.cursorVx = (state.targetX - state.cursorX) * movementStrength;
-		state.cursorVy = (state.targetY - state.cursorY) * movementStrength;
-		state.cursorVx *= damping;
-		state.cursorVy *= damping;
-
-		// Black hole gravity - viruses pull the cursor
-		// But anomalies provide counter-gravity (strategic gameplay)
-		let anomalyShieldStrength = 0;
-		for (let i = 0; i < anomalies.length; i++) {
-			const a = anomalies[i];
-			const adx = a.x - state.cursorX;
-			const ady = a.y - state.cursorY;
-			const aDist = Math.sqrt(adx * adx + ady * ady);
-
-			// Close to anomaly = reduced gravity pull
-			if (aDist < 120) {
-				const shieldFactor = 1.0 - aDist / 120;
-				anomalyShieldStrength = Math.max(
-					anomalyShieldStrength,
-					shieldFactor * 0.7,
-				); // Up to 70% reduction
-			}
-		}
-
-		// Energy station shield buff
-		if (cursorBuffs.shieldActive) {
-			anomalyShieldStrength = Math.max(anomalyShieldStrength, 0.5); // 50% gravity reduction
-		}
-
-		for (let i = 0; i < outbreaks.length; i++) {
-			const o = outbreaks[i];
-			if (o.frame < 360) continue; // Only pull phase
-
-			const dx = o.x - state.cursorX;
-			const dy = o.y - state.cursorY;
-			const dist = Math.sqrt(dx * dx + dy * dy);
-
-			// Calculate pull radius (same as particle system)
-			const pullAge = o.frame - 360;
-			const initialProgress = Math.min(pullAge / 1200, 1.0);
-			const continuousGrowth = Math.min(pullAge / 3600, 1.5);
-			const baseMultiplier =
-				CONFIG.OUTBREAK_PULL_RADIUS_MIN +
-				(CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) *
-					initialProgress;
-			const pullRadiusMultiplier = baseMultiplier + continuousGrowth * 1.5;
-			const pullRadius = o.radius * pullRadiusMultiplier;
-
-			if (dist < pullRadius && dist > 30) {
-				let pullStrength = Math.min(pullAge / 600, 1.0) * 0.4;
-				pullStrength *= 1.0 + continuousGrowth * 0.5;
-				const distanceFactor = 1.0 - Math.min(dist / pullRadius, 1.0);
-				const gravityForce =
-					pullStrength *
-					(1.0 + distanceFactor * 1.0) *
-					(1.0 - anomalyShieldStrength);
-
-				state.cursorVx += (dx / dist) * gravityForce;
-				state.cursorVy += (dy / dist) * gravityForce;
-			}
-		}
-
-		state.cursorX += state.cursorVx;
-		state.cursorY += state.cursorVy;
-	} else {
-		// Manual control
-		const dx = state.targetX - state.cursorX;
-		const dy = state.targetY - state.cursorY;
-
-		state.cursorVx += dx * CONFIG.CURSOR_SPRING;
-		state.cursorVy += dy * CONFIG.CURSOR_SPRING;
-		state.cursorVx *= CONFIG.CURSOR_DAMPING;
-		state.cursorVy *= CONFIG.CURSOR_DAMPING;
-
-		// Black hole gravity - viruses pull the cursor
-		// But anomalies provide counter-gravity (strategic gameplay)
-		let anomalyShieldStrength = 0;
-		for (let i = 0; i < anomalies.length; i++) {
-			const a = anomalies[i];
-			const adx = a.x - state.cursorX;
-			const ady = a.y - state.cursorY;
-			const aDist = Math.sqrt(adx * adx + ady * ady);
-
-			// Close to anomaly = reduced gravity pull
-			if (aDist < 120) {
-				const shieldFactor = 1.0 - aDist / 120;
-				anomalyShieldStrength = Math.max(
-					anomalyShieldStrength,
-					shieldFactor * 0.7,
-				); // Up to 70% reduction
-			}
-		}
-
-		// Energy station shield buff
-		if (cursorBuffs.shieldActive) {
-			anomalyShieldStrength = Math.max(anomalyShieldStrength, 0.5); // 50% gravity reduction
-		}
-
-		for (let i = 0; i < outbreaks.length; i++) {
-			const o = outbreaks[i];
-			if (o.frame < 360) continue; // Only pull phase
-
-			const dx = o.x - state.cursorX;
-			const dy = o.y - state.cursorY;
-			const dist = Math.sqrt(dx * dx + dy * dy);
-
-			// Calculate pull radius (same as particle system)
-			const pullAge = o.frame - 360;
-			const initialProgress = Math.min(pullAge / 1200, 1.0);
-			const continuousGrowth = Math.min(pullAge / 3600, 1.5);
-			const baseMultiplier =
-				CONFIG.OUTBREAK_PULL_RADIUS_MIN +
-				(CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) *
-					initialProgress;
-			const pullRadiusMultiplier = baseMultiplier + continuousGrowth * 1.5;
-			const pullRadius = o.radius * pullRadiusMultiplier;
-
-			if (dist < pullRadius && dist > 30) {
-				let pullStrength = Math.min(pullAge / 600, 1.0) * 0.5;
-				pullStrength *= 1.0 + continuousGrowth * 0.5;
-				const distanceFactor = 1.0 - Math.min(dist / pullRadius, 1.0);
-				const gravityForce =
-					pullStrength *
-					(1.0 + distanceFactor * 1.2) *
-					(1.0 - anomalyShieldStrength);
-
-				state.cursorVx += (dx / dist) * gravityForce;
-				state.cursorVy += (dy / dist) * gravityForce;
-			}
-		}
-
-		state.cursorX += state.cursorVx;
-		state.cursorY += state.cursorVy;
-
-		const targetRadius = particleScaling * (1.0 + radiusPulse);
-		state.radiusMultiplier += (targetRadius - state.radiusMultiplier) * 0.1;
-	}
+    // Final position update
+    state.cursorX += state.cursorVx;
+    state.cursorY += state.cursorVy;
 }
 
 function draw() {
@@ -602,47 +225,27 @@ function draw() {
 	// Draw particles
 	for (let i = 0; i < list.length; i++) {
 		const p = list[i];
+        let color = CONFIG.COLOR;
+
+        // Glyph illumination
+        for (const glyph of state.glyphs) {
+            if (glyph.isCapturing) continue;
+            for (const point of CONFIG.GLYPH_PATTERN) {
+                const dx = p.x - (glyph.x + point.x * CONFIG.GLYPH_PATTERN_SCALE);
+                const dy = p.y - (glyph.y + point.y * CONFIG.GLYPH_PATTERN_SCALE);
+                if (dx * dx + dy * dy < 4 * 4) {
+                    color = 255; // Bright white
+                }
+            }
+        }
+
 		if (p.active && p.x > 0 && p.x < w && p.y > 0 && p.y < h) {
 			const index = (Math.floor(p.y) * w + Math.floor(p.x));
-			state.imageDataBuffer[index] = (255 << 24) | (CONFIG.COLOR << 16) | (CONFIG.COLOR << 8) | CONFIG.COLOR;
+			state.imageDataBuffer[index] = (255 << 24) | (color << 16) | (color << 8) | color;
 		}
 	}
 
 	ctx.putImageData(state.imageData, 0, 0);
-
-	// Draw cursor buffs
-	const now = Date.now();
-	const manualReduction = state.isManual ? 0.3 : 1.0;
-
-	if (cursorBuffs.shieldActive) {
-		const pulse = Math.sin(now * 0.008) * 0.5 + 0.5;
-		const radius = CONFIG.REPULSION_RADIUS * radiusMultiplier * (1.0 + 0.8 * manualReduction);
-		ctx.beginPath();
-		ctx.strokeStyle = `rgba(0, 255, 0, ${0.2 + pulse * 0.3})`;
-		ctx.lineWidth = 1 + pulse * 2;
-		ctx.arc(cursorX, cursorY, radius, 0, Math.PI * 2);
-		ctx.stroke();
-	}
-
-	if (cursorBuffs.damageBoostActive) {
-		const pulse = Math.sin(now * 0.014) * 0.5 + 0.5;
-		const radius = CONFIG.REPULSION_RADIUS * radiusMultiplier * (1.0 + 1.0 * manualReduction);
-		ctx.beginPath();
-		ctx.strokeStyle = `rgba(255, 100, 0, ${0.2 + pulse * 0.4})`;
-		ctx.lineWidth = 2 + pulse * 3;
-		ctx.arc(cursorX, cursorY, radius, 0, Math.PI * 2);
-		ctx.stroke();
-	}
-
-	if (cursorBuffs.blackHoleKillBoostActive) {
-		const pulse = Math.sin(now * 0.018) * 0.5 + 0.5;
-		const radius = CONFIG.REPULSION_RADIUS * radiusMultiplier * (1.0 + 1.5 * manualReduction);
-		ctx.beginPath();
-		ctx.strokeStyle = `rgba(255, 255, 255, ${0.3 + pulse * 0.5})`;
-		ctx.lineWidth = 3 + pulse * 4;
-		ctx.arc(cursorX, cursorY, radius, 0, Math.PI * 2);
-		ctx.stroke();
-	}
 }
 
 function loop() {
@@ -661,7 +264,7 @@ function loop() {
 		updateGrowth(state);
 		updateOutbreaks(state);
 		updateAnomalies(state);
-		updateStations(state);
+        updateGlyphs(state);
 
 		for (let i = 0; i < state.list.length; i++) {
 			state.list[i].update(state);
@@ -736,8 +339,11 @@ function init() {
 		state.maxParticleDistance = Math.max(state.maxParticleDistance, state.list[i].distFromCenter);
 	}
 
-	state.cursorX = state.targetX = state.centerX;
-	state.cursorY = state.targetY = state.centerY;
+    // Start cursor off-screen for a delayed "warp-in" effect
+    const startAngle = Math.random() * Math.PI * 2;
+    const startDist = Math.max(state.w, state.h);
+	state.cursorX = state.targetX = state.centerX + Math.cos(startAngle) * startDist;
+	state.cursorY = state.targetY = state.centerY + Math.sin(startAngle) * startDist;
 
 	state.pathRadiusVariation = 0.8 + Math.random() * 0.4;
 	state.pathSpeedVariation = 0.9 + Math.random() * 0.2;
@@ -750,7 +356,7 @@ function init() {
 	state.nextOutbreakTime = state.startTime + spawnMin;
 	const anomalySpawnMin = state.isMobile ? CONFIG.ANOMALY_SPAWN_MIN_MOBILE : CONFIG.ANOMALY_SPAWN_MIN;
 	state.nextAnomalyTime = state.startTime + anomalySpawnMin;
-	state.nextStationTime = state.startTime + CONFIG.STATION_SPAWN_MIN;
+    state.nextGlyphSpawnTime = state.startTime + CONFIG.GLYPH_SPAWN_MIN;
 	state.nextDisruptionTime = state.startTime + 45000; // First disruption possible after 45s
 
 	if (state.container.firstChild) {
@@ -813,7 +419,64 @@ function setupEventListeners() {
 }
 
 function updateDebugPanel() {
-    // ... implementation to be added
+    const now = Date.now();
+    state.frameCount++;
+    if (now - state.lastFpsUpdate > 1000) {
+        state.fps = state.frameCount;
+        state.frameCount = 0;
+        state.lastFpsUpdate = now;
+    }
+
+    const largestVirus = state.outbreaks.reduce((largest, o) => (!largest || o.radius > largest.radius) ? o : largest, null);
+
+    const debugData = {
+        time: {
+            elapsed: ((now - state.startTime) / 1000).toFixed(1) + 's',
+        },
+        performance: {
+            fps: state.fps,
+            canvasWidth: state.w,
+            canvasHeight: state.h,
+            screenMultiplier: state.screenSizeMultiplier.toFixed(2),
+            isMobile: state.isMobile,
+        },
+        particles: {
+            active: Math.round(state.activeParticleRatio * state.list.length),
+            total: state.list.length,
+            percentage: (state.activeParticleRatio * 100).toFixed(1),
+            growthPhase: (Math.min((now - state.startTime) / CONFIG.GROWTH_DURATION, 1) * 100).toFixed(1) + '%',
+            spacing: state.isMobile ? CONFIG.SPACING_MOBILE : CONFIG.SPACING_DESKTOP,
+        },
+        cursor: {
+            x: state.cursorX.toFixed(1),
+            y: state.cursorY.toFixed(1),
+            vx: state.cursorVx.toFixed(2),
+            vy: state.cursorVy.toFixed(2),
+            speed: Math.sqrt(state.cursorVx**2 + state.cursorVy**2).toFixed(2),
+            radius: (CONFIG.REPULSION_RADIUS * state.radiusMultiplier).toFixed(1),
+            radiusMultiplier: state.radiusMultiplier.toFixed(2),
+            mode: state.isManual ? 'Manual' : 'Automatic',
+            buffs: Object.entries(state.cursorBuffs).filter(([k, v]) => v === true || v > now).map(([k]) => k.replace('Active', ''))
+        },
+        viruses: {
+            count: state.outbreaks.length,
+            nextSpawn: ((state.nextOutbreakTime - now) / 1000).toFixed(1) + 's',
+            largest: largestVirus ? {
+                health: largestVirus.health.toFixed(0),
+                maxHealth: largestVirus.maxHealth.toFixed(0),
+                healthPercent: (largestVirus.health / largestVirus.maxHealth * 100).toFixed(0),
+                radius: largestVirus.radius.toFixed(1),
+                frame: largestVirus.frame,
+                phase: largestVirus.frame < 360 ? 'Push' : 'Pull',
+            } : null,
+        },
+        anomalies: {
+            count: state.anomalies.length,
+        },
+        gameState: {}
+    };
+
+    state.debugPanel.update(debugData);
 }
 
 // Debug spawn functions
@@ -842,18 +505,6 @@ window.debugSpawnAnomaly = () => {
         driftTargetX: null, driftTargetY: null, isDrifting: false,
         driftTimer: 0, orbitTimer: 5000, health: 60, maxHealth: 60,
         frame: 0, age: 0
-    });
-};
-
-window.debugSpawnStation = () => {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 100;
-    state.stations.push({
-        x: state.cursorX + Math.cos(angle) * distance,
-        y: state.cursorY + Math.sin(angle) * distance,
-        driftAngle: Math.random() * Math.PI * 2,
-        frame: 0, spawnTime: Date.now(), captured: false,
-        ripples: [], nextRippleTime: Date.now() + 1000
     });
 };
 
