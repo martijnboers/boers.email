@@ -475,7 +475,4 @@ class DebugPanel {
 	}
 }
 
-// Export for use in main animation file
-if (typeof module !== 'undefined' && module.exports) {
-	module.exports = DebugPanel;
-}
+export default DebugPanel;
