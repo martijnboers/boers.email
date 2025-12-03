@@ -31,6 +31,7 @@ const state = {
     debugPanel: null, screenSizeMultiplier: 1.0,
     frameCount: 0, fps: 0, lastFpsUpdate: 0,
     resizeTimeout: null,
+    lastPhysicsTime: 0,
 };
 
 // Heavy cursor calculations (physics frames only)
@@ -159,6 +160,42 @@ function updateCursorForces(deltaTime) {
 
 // Light cursor position update (every frame for smooth 60fps)
 function updateCursorPosition() {
+	// Calculate particle resistance when moving manually
+	if (state.isManual) {
+		let resistanceForce = 0;
+		const cursorSpeed = Math.sqrt(state.cursorVx * state.cursorVx + state.cursorVy * state.cursorVy);
+
+		if (cursorSpeed > 0.1) {
+			// Check nearby particles for resistance
+			const checkRadius = CONFIG.REPULSION_RADIUS * state.radiusMultiplier * 1.5;
+			const checkRadiusSq = checkRadius * checkRadius;
+			let nearbyCount = 0;
+
+			for (let i = 0; i < state.list.length; i++) {
+				const p = state.list[i];
+				if (!p.active) continue;
+
+				const dx = p.x - state.cursorX;
+				const dy = p.y - state.cursorY;
+				const distSq = dx * dx + dy * dy;
+
+				if (distSq < checkRadiusSq) {
+					nearbyCount++;
+					if (nearbyCount > 20) break; // Cap for performance
+				}
+			}
+
+			// More particles = more resistance (max ~40% slowdown)
+			resistanceForce = Math.min(nearbyCount / 50, 0.4);
+		}
+
+		state.cursorVx *= (1.0 - resistanceForce);
+		state.cursorVy *= (1.0 - resistanceForce);
+	}
+
+	// Skip position update on mobile when manual - position is set directly in handleInput
+	if (state.isMobile && state.isManual) return;
+
 	// Scale velocity by inverse of screen size - bigger screens = slower cursor
 	const speedScale = Math.max(0.5, 1.0 / state.screenSizeMultiplier);
 	state.cursorX += state.cursorVx * speedScale;
@@ -249,9 +286,22 @@ function updateGrowth() {
     let activeCount = 0;
     for (let i = 0; i < state.list.length; i++) {
         const p = state.list[i];
-        const directionalGrowth = Math.sin(p.angle * 3 + timeA) * 0.15 + Math.sin(p.angle * 5 - timeB) * 0.1;
+        // Reduced amplitudes for smoother directional growth (was 0.15 and 0.1)
+        const directionalGrowth = Math.sin(p.angle * 3 + timeA) * 0.08 + Math.sin(p.angle * 5 - timeB) * 0.05;
         const threshold = baseThreshold * (1 + directionalGrowth + p.growthOffset);
-        p.active = p.distFromCenter <= threshold;
+        const shouldBeActive = p.distFromCenter <= threshold;
+
+        // Gradual activation: don't instantly flip state
+        if (shouldBeActive && !p.active) {
+            p.active = true;
+        } else if (!shouldBeActive && p.active) {
+            // Add small buffer before deactivating to avoid flicker
+            const buffer = baseThreshold * 0.02;
+            if (p.distFromCenter > threshold + buffer) {
+                p.active = false;
+            }
+        }
+
         if (p.active) activeCount++;
     }
     state.activeParticleRatio = activeCount / state.list.length;
@@ -261,9 +311,13 @@ function loop() {
 	const now = Date.now();
 	const deltaTime = (now - state.lastFrameTime) / 1000;
 	state.lastFrameTime = now;
-	state.frameToggle = !state.frameToggle;
 
-	if (state.frameToggle) {
+	// Run physics at 40fps (every 25ms)
+	const physicsInterval = 1000 / 40;
+	const shouldUpdatePhysics = (now - state.lastPhysicsTime) >= physicsInterval;
+
+	if (shouldUpdatePhysics) {
+		state.lastPhysicsTime = now;
 		const elapsed = now - state.startTime;
 		state.spiralStrength = CONFIG.SPIRAL_STRENGTH_BASE + elapsed * CONFIG.SPIRAL_TIGHTENING_RATE;
 		updateCursorForces(deltaTime);
@@ -274,9 +328,11 @@ function loop() {
 		for (const p of state.list) {
 			p.update(state);
 		}
-	} else {
-		draw();
 	}
+
+	// Always draw at 60fps
+	draw();
+
 	// Update cursor position every frame for smooth 60fps movement
 	updateCursorPosition();
 	if (state.debugPanel) updateDebugPanel();
@@ -329,7 +385,7 @@ function init() {
     state.pathStartOffset = Math.random() * Math.PI * 2;
     state.wobblePhaseX = Math.random() * 10000;
     state.wobblePhaseY = Math.random() * 10000;
-    state.startTime = state.lastFrameTime = Date.now();
+    state.startTime = state.lastFrameTime = state.lastPhysicsTime = Date.now();
     state.nextOutbreakTime = state.startTime + (state.isMobile ? 15000 : 12000);
     state.nextAnomalyTime = state.startTime + (state.isMobile ? 20000 : 10000);
     state.nextStationTime = state.startTime + CONFIG.STATION_SPAWN_MIN;
@@ -349,15 +405,44 @@ function init() {
 }
 
 function setupEventListeners() {
+    // Detect Firefox
+    const isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+
     const handleInput = (clientX, clientY) => {
+        if (!state.canvas) return;
+
         // Convert viewport coordinates to canvas coordinates
         const rect = state.canvas.getBoundingClientRect();
-        const canvasX = clientX - rect.left;
-        const canvasY = clientY - rect.top;
+
+        // Firefox mobile needs page coordinates instead of client coordinates
+        let adjustedX = clientX;
+        let adjustedY = clientY;
+
+        if (isFirefox && state.isMobile) {
+            adjustedX = clientX;
+            adjustedY = clientY - window.scrollY;
+        }
+
+        // Scale from display size to canvas buffer size
+        const scaleX = state.canvas.width / rect.width;
+        const scaleY = state.canvas.height / rect.height;
+
+        const canvasX = (adjustedX - rect.left) * scaleX;
+        const canvasY = (adjustedY - rect.top) * scaleY;
 
         clearTimeout(state.manualTimeout);
-        state.targetX = canvasX;
-        state.targetY = canvasY;
+
+        // On mobile, set position directly for responsive feel
+        if (state.isMobile) {
+            state.cursorX = state.targetX = canvasX;
+            state.cursorY = state.targetY = canvasY;
+            state.cursorVx = 0;
+            state.cursorVy = 0;
+        } else {
+            state.targetX = canvasX;
+            state.targetY = canvasY;
+        }
+
         if (!state.isManual) state.transitionBlend = 0;
         state.isManual = true;
         state.manualTimeout = setTimeout(() => {
