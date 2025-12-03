@@ -102,7 +102,7 @@ function updateCursorForces(deltaTime) {
 
 	if (!state.isManual) {
 		state.pathTime += deltaTime * speed;
-		const radius = (isMobile ? 0.5 : CONFIG.CURSOR_PATH_RADIUS) * state.pathRadiusVariation;
+		const radius = (isMobile ? 0.75 : CONFIG.CURSOR_PATH_RADIUS) * state.pathRadiusVariation;
 		const wobbleX = Math.sin((elapsed + state.wobblePhaseX) * 0.0004) * w * 0.08;
 		const wobbleY = Math.cos((elapsed + state.wobblePhaseY) * 0.0005) * h * 0.08;
 		let baseTargetX = centerX + Math.sin(state.pathTime + state.pathStartOffset) * w * radius + wobbleX;
@@ -156,7 +156,7 @@ function updateCursorForces(deltaTime) {
     else particleScaling = 1.0 + (isMobile ? 0.25 : 0.3) - ((activeParticleRatio - 0.4) / 0.6) * 0.65;
     if (state.disruptionIntensity > 0) particleScaling *= 1.0 + state.disruptionIntensity * 0.6;
     const radiusPulse = Math.sin(elapsed * 0.0012) * 0.18;
-    const targetRadius = particleScaling * (1.0 + radiusPulse);
+    const targetRadius = particleScaling * (1.0 + radiusPulse) * (isMobile ? 0.7 : 1.0); // Mobile: 70% cursor size
     state.radiusMultiplier += (targetRadius - state.radiusMultiplier) * 0.1;
 }
 
@@ -340,13 +340,13 @@ function updateGrowth() {
         // Smooth alpha fading instead of instant on/off
         if (shouldBeActive) {
             if (!p.active) p.active = true;
-            // Quick fade in
-            p.alpha = Math.min(1.0, p.alpha + 0.15);
+            // Gradual fade in
+            p.alpha = Math.min(1.0, p.alpha + 0.02);
         } else {
-            // Quick fade out
+            // Gradual fade out (even slower)
             const buffer = baseThreshold * 0.02;
             if (p.distFromCenter > threshold + buffer) {
-                p.alpha = Math.max(0, p.alpha - 0.15);
+                p.alpha = Math.max(0, p.alpha - 0.01);
                 // Only deactivate after fully faded
                 if (p.alpha === 0) p.active = false;
             }
