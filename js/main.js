@@ -87,9 +87,10 @@ function updateCursorForces(deltaTime) {
         else if (activeParticleRatio < 0.7) activityBoost = 1.15 - ((activeParticleRatio - 0.5) / 0.2) * 0.25;
         else activityBoost = 0.9 - ((activeParticleRatio - 0.7) / 0.3) * 0.3;
     } else {
-        if (activeParticleRatio < 0.5) activityBoost = 0.7 + activeParticleRatio * 0.3;
-        else if (activeParticleRatio < 0.7) activityBoost = 0.85 - ((activeParticleRatio - 0.5) / 0.2) * 0.25;
-        else activityBoost = 0.6 - ((activeParticleRatio - 0.7) / 0.3) * 0.3;
+        // Desktop: faster base speed
+        if (activeParticleRatio < 0.5) activityBoost = 1.1 + activeParticleRatio * 0.3;
+        else if (activeParticleRatio < 0.7) activityBoost = 1.25 - ((activeParticleRatio - 0.5) / 0.2) * 0.25;
+        else activityBoost = 1.0 - ((activeParticleRatio - 0.7) / 0.3) * 0.3;
     }
     speed *= activityBoost;
 
@@ -284,10 +285,12 @@ function updateGrowth() {
 
         for (let i = 0; i < state.list.length; i++) {
             state.list[i].active = false;
+            state.list[i].alpha = 0; // Set alpha for fade system
         }
 
         for (let i = 0; i < targetCount; i++) {
             sorted[i].active = true;
+            sorted[i].alpha = 1.0; // Full alpha for visible particles
         }
 
         state.activeParticleRatio = targetRatio;
