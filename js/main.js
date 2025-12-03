@@ -513,21 +513,12 @@ function setupEventListeners() {
         // Convert viewport coordinates to canvas coordinates
         const rect = state.canvas.getBoundingClientRect();
 
-        // Firefox mobile needs page coordinates instead of client coordinates
-        let adjustedX = clientX;
-        let adjustedY = clientY;
-
-        if (isFirefox && state.isMobile) {
-            adjustedX = clientX;
-            adjustedY = clientY - window.scrollY;
-        }
-
         // Scale from display size to canvas buffer size
         const scaleX = state.canvas.width / rect.width;
         const scaleY = state.canvas.height / rect.height;
 
-        const canvasX = (adjustedX - rect.left) * scaleX;
-        const canvasY = (adjustedY - rect.top) * scaleY;
+        const canvasX = (clientX - rect.left) * scaleX;
+        const canvasY = (clientY - rect.top) * scaleY;
 
         clearTimeout(state.manualTimeout);
 
