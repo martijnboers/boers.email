@@ -235,10 +235,10 @@ function draw() {
 
 	for (let i = 0; i < list.length; i++) {
 		const p = list[i];
-		if (!p.active) continue;
+		if (!p.active || p.alpha === 0) continue;
 
         let color = CONFIG.COLOR;
-        let visibility = 1.0;
+        let visibility = p.alpha; // Apply alpha fade
 
         // Check visibility dimming from mature outbreaks
         for (let j = 0; j < matureOutbreaks.length; j++) {
@@ -337,18 +337,22 @@ function updateGrowth() {
         const threshold = baseThreshold * (1 + directionalGrowth + noiseA + noiseB + trailingBonus + p.growthOffset);
         const shouldBeActive = p.distFromCenter <= threshold;
 
-        // Gradual activation: don't instantly flip state
-        if (shouldBeActive && !p.active) {
-            p.active = true;
-        } else if (!shouldBeActive && p.active) {
-            // Add small buffer before deactivating to avoid flicker
+        // Smooth alpha fading instead of instant on/off
+        if (shouldBeActive) {
+            if (!p.active) p.active = true;
+            // Quick fade in
+            p.alpha = Math.min(1.0, p.alpha + 0.15);
+        } else {
+            // Quick fade out
             const buffer = baseThreshold * 0.02;
             if (p.distFromCenter > threshold + buffer) {
-                p.active = false;
+                p.alpha = Math.max(0, p.alpha - 0.15);
+                // Only deactivate after fully faded
+                if (p.alpha === 0) p.active = false;
             }
         }
 
-        if (p.active) activeCount++;
+        if (p.active && p.alpha > 0) activeCount++;
     }
     state.activeParticleRatio = activeCount / state.list.length;
 }

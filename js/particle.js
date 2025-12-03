@@ -17,6 +17,7 @@ export class Particle {
 		this.angle = Math.atan2(dy, dx);
 
 		this.active = false;
+		this.alpha = 0; // Fade alpha for smooth transitions
 		this.growthOffset = Math.random() * 0.15;
 
 		// Organic behavior traits
