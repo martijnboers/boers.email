@@ -26,15 +26,15 @@ export class Particle {
 
 	update(state) {
         const {
-            cursorX, cursorY, radiusMultiplier, spiralStrength, outbreaks,
+            renderCursorX, renderCursorY, radiusMultiplier, spiralStrength, outbreaks,
             anomalies, cursorVx, cursorVy, isManual, cursorBuffs, isMobile,
             activeParticleRatio, stations
         } = state;
 
 		if (!this.active) return;
 
-		const dx = cursorX - this.x;
-		const dy = cursorY - this.y;
+		const dx = renderCursorX - this.x;
+		const dy = renderCursorY - this.y;
 		const distSq = dx * dx + dy * dy;
 		const dist = Math.sqrt(distSq);
 

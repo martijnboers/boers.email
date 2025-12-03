@@ -207,42 +207,62 @@ class DebugPanel {
 		controls.style.cssText = "margin-bottom: 16px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 4px;";
 		controls.innerHTML = `
 			<div style="color: #4CAF50; font-weight: bold; margin-bottom: 8px;">CONTROLS</div>
-			<button id="spawn-virus-btn" style="
-				background: rgba(255, 50, 50, 0.3);
-				border: 1px solid #f44336;
-				color: #fff;
-				padding: 6px 12px;
-				margin: 4px;
-				cursor: pointer;
-				font-family: 'JetBrains Mono', monospace;
-				font-size: 11px;
-				border-radius: 3px;
-				transition: transform 0.1s ease;
-			">+ Virus</button>
-			<button id="spawn-anomaly-btn" style="
-				background: rgba(156, 39, 176, 0.3);
-				border: 1px solid #9C27B0;
-				color: #fff;
-				padding: 6px 12px;
-				margin: 4px;
-				cursor: pointer;
-				font-family: 'JetBrains Mono', monospace;
-				font-size: 11px;
-				border-radius: 3px;
-				transition: transform 0.1s ease;
-			">+ Anomaly</button>
-			<button id="spawn-station-btn" style="
-				background: rgba(255, 193, 7, 0.3);
-				border: 1px solid #FFC107;
-				color: #fff;
-				padding: 6px 12px;
-				margin: 4px;
-				cursor: pointer;
-				font-family: 'JetBrains Mono', monospace;
-				font-size: 11px;
-				border-radius: 3px;
-				transition: transform 0.1s ease;
-			">+ Station</button>
+			<div style="margin-bottom: 12px;">
+				<button id="spawn-virus-btn" style="
+					background: rgba(255, 50, 50, 0.3);
+					border: 1px solid #f44336;
+					color: #fff;
+					padding: 6px 12px;
+					margin: 4px;
+					cursor: pointer;
+					font-family: 'JetBrains Mono', monospace;
+					font-size: 11px;
+					border-radius: 3px;
+					transition: transform 0.1s ease;
+				">+ Virus</button>
+				<button id="spawn-anomaly-btn" style="
+					background: rgba(156, 39, 176, 0.3);
+					border: 1px solid #9C27B0;
+					color: #fff;
+					padding: 6px 12px;
+					margin: 4px;
+					cursor: pointer;
+					font-family: 'JetBrains Mono', monospace;
+					font-size: 11px;
+					border-radius: 3px;
+					transition: transform 0.1s ease;
+				">+ Anomaly</button>
+				<button id="spawn-station-btn" style="
+					background: rgba(255, 193, 7, 0.3);
+					border: 1px solid #FFC107;
+					color: #fff;
+					padding: 6px 12px;
+					margin: 4px;
+					cursor: pointer;
+					font-family: 'JetBrains Mono', monospace;
+					font-size: 11px;
+					border-radius: 3px;
+					transition: transform 0.1s ease;
+				">+ Station</button>
+			</div>
+			<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+				<div style="font-size: 10px; color: #888; margin-bottom: 6px;">
+					Particle Visibility: <span id="particle-visibility-value">Auto</span>
+				</div>
+				<input type="range" id="particle-visibility-slider" min="0" max="100" value="0" style="
+					width: 100%;
+					height: 6px;
+					cursor: pointer;
+					accent-color: #4CAF50;
+				">
+				<div style="font-size: 9px; color: #666; margin-top: 4px; display: flex; justify-content: space-between;">
+					<span>Auto</span>
+					<span>25%</span>
+					<span>50%</span>
+					<span>75%</span>
+					<span>100%</span>
+				</div>
+			</div>
 		`;
 
 		// Create dynamic content container
@@ -334,6 +354,21 @@ class DebugPanel {
 		setupButton('#spawn-virus-btn', window.debugSpawnVirus, 'debugSpawnVirus');
 		setupButton('#spawn-anomaly-btn', window.debugSpawnAnomaly, 'debugSpawnAnomaly');
 		setupButton('#spawn-station-btn', window.debugSpawnStation, 'debugSpawnStation');
+
+		// Setup particle visibility slider
+		const visibilitySlider = this.element.querySelector('#particle-visibility-slider');
+		const visibilityValue = this.element.querySelector('#particle-visibility-value');
+		if (visibilitySlider && visibilityValue && window.debugSetParticleVisibility) {
+			visibilitySlider.addEventListener('input', (e) => {
+				const value = parseInt(e.target.value);
+				if (value === 0) {
+					visibilityValue.textContent = 'Auto';
+				} else {
+					visibilityValue.textContent = value + '%';
+				}
+				window.debugSetParticleVisibility(value);
+			});
+		}
 	}
 
 	update(debugData) {

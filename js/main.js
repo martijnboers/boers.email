@@ -32,6 +32,8 @@ const state = {
     frameCount: 0, fps: 0, lastFpsUpdate: 0,
     resizeTimeout: null,
     lastPhysicsTime: 0,
+    debugParticleVisibility: 0, // 0 = auto, 1-100 = force percentage
+    renderCursorX: 0, renderCursorY: 0, // Smooth 60fps cursor position
 };
 
 // Heavy cursor calculations (physics frames only)
@@ -185,8 +187,10 @@ function updateCursorPosition() {
 				}
 			}
 
-			// More particles = more resistance (max ~40% slowdown)
-			resistanceForce = Math.min(nearbyCount / 50, 0.4);
+			// More particles = more resistance, but scale down on bigger screens
+			// Mobile: max 40% slowdown, Desktop: max 25% slowdown
+			const maxResistance = state.isMobile ? 0.4 : 0.25;
+			resistanceForce = Math.min(nearbyCount / 50, maxResistance);
 		}
 
 		state.cursorVx *= (1.0 - resistanceForce);
@@ -269,6 +273,26 @@ function draw() {
 }
 
 function updateGrowth() {
+    // Debug mode: override particle visibility with slider value
+    if (state.debugParticleVisibility > 0) {
+        const targetRatio = state.debugParticleVisibility / 100;
+        const targetCount = Math.floor(state.list.length * targetRatio);
+
+        // Sort particles by distance from center and activate closest ones
+        const sorted = [...state.list].sort((a, b) => a.distFromCenter - b.distFromCenter);
+
+        for (let i = 0; i < state.list.length; i++) {
+            state.list[i].active = false;
+        }
+
+        for (let i = 0; i < targetCount; i++) {
+            sorted[i].active = true;
+        }
+
+        state.activeParticleRatio = targetRatio;
+        return;
+    }
+
     const elapsed = Date.now() - state.startTime;
     const progress = Math.min(elapsed / CONFIG.GROWTH_DURATION, 1);
     let radiusProgress;
@@ -286,9 +310,12 @@ function updateGrowth() {
     let activeCount = 0;
     for (let i = 0; i < state.list.length; i++) {
         const p = state.list[i];
-        // Reduced amplitudes for smoother directional growth (was 0.15 and 0.1)
-        const directionalGrowth = Math.sin(p.angle * 3 + timeA) * 0.08 + Math.sin(p.angle * 5 - timeB) * 0.05;
-        const threshold = baseThreshold * (1 + directionalGrowth + p.growthOffset);
+        // Very subtle directional growth with more noise to avoid stripes
+        const directionalGrowth = Math.sin(p.angle * 3 + timeA) * 0.04 + Math.sin(p.angle * 7 - timeB) * 0.03;
+        // Add perlin-like noise to break up patterns
+        const noiseA = Math.sin(p.angle * 11 + time * 0.3) * 0.03;
+        const noiseB = Math.cos(p.angle * 13 - time * 0.4) * 0.02;
+        const threshold = baseThreshold * (1 + directionalGrowth + noiseA + noiseB + p.growthOffset);
         const shouldBeActive = p.distFromCenter <= threshold;
 
         // Gradual activation: don't instantly flip state
@@ -321,6 +348,7 @@ function loop() {
 		const elapsed = now - state.startTime;
 		state.spiralStrength = CONFIG.SPIRAL_STRENGTH_BASE + elapsed * CONFIG.SPIRAL_TIGHTENING_RATE;
 		updateCursorForces(deltaTime);
+		updateCursorPosition();
 		updateGrowth();
 		updateOutbreaks(state);
 		updateAnomalies(state);
@@ -330,11 +358,12 @@ function loop() {
 		}
 	}
 
-	// Always draw at 60fps
-	draw();
+	// Smooth cursor interpolation for 60fps visuals
+	const alpha = 0.3; // Smoothing factor
+	state.renderCursorX += (state.cursorX - state.renderCursorX) * alpha;
+	state.renderCursorY += (state.cursorY - state.renderCursorY) * alpha;
 
-	// Update cursor position every frame for smooth 60fps movement
-	updateCursorPosition();
+	draw();
 	if (state.debugPanel) updateDebugPanel();
 	requestAnimationFrame(loop);
 }
@@ -380,6 +409,8 @@ function init() {
     state.maxParticleDistance = Math.max(...state.list.map(p => p.distFromCenter));
     state.cursorX = state.targetX = state.centerX;
     state.cursorY = state.targetY = state.centerY;
+    state.renderCursorX = state.centerX;
+    state.renderCursorY = state.centerY;
     state.pathRadiusVariation = 0.8 + Math.random() * 0.4;
     state.pathSpeedVariation = 0.9 + Math.random() * 0.2;
     state.pathStartOffset = Math.random() * Math.PI * 2;
@@ -455,6 +486,12 @@ function setupEventListeners() {
     document.addEventListener("touchmove", e => { if (e.touches.length === 1) { e.preventDefault(); handleInput(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
     window.addEventListener("resize", () => { clearTimeout(state.resizeTimeout); state.resizeTimeout = setTimeout(init, 200); });
 }
+
+// Debug function to set particle visibility percentage
+window.debugSetParticleVisibility = (percentage) => {
+    state.debugParticleVisibility = percentage;
+    console.log('Debug particle visibility:', percentage === 0 ? 'Auto' : percentage + '%');
+};
 
 function updateDebugPanel() {
     if (!state.debugPanel) return;
