@@ -543,7 +543,15 @@ function setupEventListeners() {
     };
     document.addEventListener("mousemove", e => handleInput(e.clientX, e.clientY));
     document.addEventListener("touchstart", e => { if (e.touches.length === 1) handleInput(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-    document.addEventListener("touchmove", e => { if (e.touches.length === 1) { e.preventDefault(); handleInput(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
+    document.addEventListener("touchmove", e => {
+        if (e.touches.length === 1) {
+            // Only prevent default if touching the canvas
+            if (e.target === state.canvas) {
+                e.preventDefault();
+            }
+            handleInput(e.touches[0].clientX, e.touches[0].clientY);
+        }
+    }, { passive: false });
     window.addEventListener("resize", () => { clearTimeout(state.resizeTimeout); state.resizeTimeout = setTimeout(init, 200); });
 }
 
