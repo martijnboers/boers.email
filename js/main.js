@@ -363,6 +363,43 @@ function loop() {
 		state.lastPhysicsTime = now;
 		const elapsed = now - state.startTime;
 		state.spiralStrength = CONFIG.SPIRAL_STRENGTH_BASE + elapsed * CONFIG.SPIRAL_TIGHTENING_RATE;
+
+		// Pre-calculate expensive values ONCE per frame instead of per particle
+		const cursorSpeedSq = state.cursorVx * state.cursorVx + state.cursorVy * state.cursorVy;
+		state.cursorSpeed = Math.sqrt(cursorSpeedSq);
+		state.cursorDirX = state.cursorSpeed > 0 ? state.cursorVx / state.cursorSpeed : 0;
+		state.cursorDirY = state.cursorSpeed > 0 ? state.cursorVy / state.cursorSpeed : 0;
+
+		// Pre-calculate buff multipliers and pulse values ONCE
+		const manualReduction = state.isManual ? 0.3 : 1.0;
+		state.buffRadiusMultiplier = 1.0;
+		state.buffForceMultiplier = 1.0;
+		state.hasPulsatingBuff = false;
+		state.pulseStrength = 0;
+
+		if (state.cursorBuffs.shieldActive) {
+			state.hasPulsatingBuff = true;
+			const pulse = Math.sin(now * 0.008) * 0.5 + 0.5;
+			state.pulseStrength = pulse * 12.0 * manualReduction;
+			state.buffRadiusMultiplier = 1.0 + (0.8 * manualReduction);
+		}
+
+		if (state.cursorBuffs.damageBoostActive) {
+			state.hasPulsatingBuff = true;
+			const pulse = Math.sin(now * 0.014) * 0.5 + 0.5;
+			state.pulseStrength = Math.max(state.pulseStrength, pulse * 15.0 * manualReduction);
+			state.buffRadiusMultiplier = Math.max(state.buffRadiusMultiplier, 1.0 + (1.0 * manualReduction));
+		}
+
+		if (state.cursorBuffs.blackHoleKillBoostActive) {
+			state.hasPulsatingBuff = true;
+			const pulse = Math.sin(now * 0.018) * 0.5 + 0.5;
+			state.pulseStrength = pulse * 25.0 * manualReduction;
+			state.buffRadiusMultiplier = 1.0 + (1.5 * manualReduction);
+		}
+
+		state.now = now; // Pass timestamp to particles
+
 		updateCursorForces(deltaTime);
 		updateCursorPosition();
 		updateGrowth();

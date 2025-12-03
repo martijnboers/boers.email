@@ -27,8 +27,9 @@ export class Particle {
 	update(state) {
         const {
             renderCursorX, renderCursorY, radiusMultiplier, spiralStrength, outbreaks,
-            anomalies, cursorVx, cursorVy, isManual, cursorBuffs, isMobile,
-            activeParticleRatio, stations
+            anomalies, isMobile, activeParticleRatio, stations,
+            buffRadiusMultiplier, buffForceMultiplier, hasPulsatingBuff, pulseStrength,
+            cursorSpeed, cursorDirX, cursorDirY, now
         } = state;
 
 		if (!this.active) return;
@@ -36,46 +37,55 @@ export class Particle {
 		const dx = renderCursorX - this.x;
 		const dy = renderCursorY - this.y;
 		const distSq = dx * dx + dy * dy;
-		const dist = Math.sqrt(distSq);
-
-		let buffRadiusMultiplier = 1.0;
-		let buffForceMultiplier = 1.0;
-		let hasPulsatingBuff = false;
-		let pulseStrength = 0;
-		const now = Date.now();
-		const manualReduction = isManual ? 0.3 : 1.0;
-
-		if (cursorBuffs.shieldActive) {
-			hasPulsatingBuff = true;
-			const pulse = Math.sin(now * 0.008) * 0.5 + 0.5;
-			pulseStrength = pulse * 12.0 * manualReduction;
-			buffRadiusMultiplier = 1.0 + (0.8 * manualReduction);
-		}
-
-		if (cursorBuffs.damageBoostActive) {
-			hasPulsatingBuff = true;
-			const pulse = Math.sin(now * 0.014) * 0.5 + 0.5;
-			pulseStrength = Math.max(pulseStrength, pulse * 15.0 * manualReduction);
-			buffRadiusMultiplier = Math.max(buffRadiusMultiplier, 1.0 + (1.0 * manualReduction));
-		}
-
-		if (cursorBuffs.blackHoleKillBoostActive) {
-			hasPulsatingBuff = true;
-			const pulse = Math.sin(now * 0.018) * 0.5 + 0.5;
-			pulseStrength = pulse * 25.0 * manualReduction;
-			buffRadiusMultiplier = 1.0 + (1.5 * manualReduction);
-		}
 
 		const dynamicRadiusSq = CONFIG.REPULSION_RADIUS ** 2 * radiusMultiplier ** 2 * buffRadiusMultiplier ** 2;
 
-		const awarenessRadiusSq = (this.awareness + Math.sqrt(dynamicRadiusSq)) ** 2;
-		if (distSq < awarenessRadiusSq && distSq > dynamicRadiusSq) {
-			const cursorSpeed = Math.sqrt(cursorVx * cursorVx + cursorVy * cursorVy);
-			if (cursorSpeed > 1.5) {
-				const cursorDirX = cursorVx / cursorSpeed;
-				const cursorDirY = cursorVy / cursorSpeed;
-				const toParticleX = -dx / dist;
-				const toParticleY = -dy / dist;
+		// Early exit: if particle is far from cursor and all entities, skip expensive calculations
+		const maxInteractionRange = 200;
+		const maxInteractionRangeSq = maxInteractionRange * maxInteractionRange;
+
+		let nearSomething = distSq < dynamicRadiusSq * 4;
+
+		if (!nearSomething && outbreaks.length > 0) {
+			for (const o of outbreaks) {
+				const odx = this.x - o.x;
+				const ody = this.y - o.y;
+				if (odx * odx + ody * ody < maxInteractionRangeSq) {
+					nearSomething = true;
+					break;
+				}
+			}
+		}
+
+		if (!nearSomething && anomalies.length > 0) {
+			for (const a of anomalies) {
+				const adx = this.x - a.x;
+				const ady = this.y - a.y;
+				if (adx * adx + ady * ady < maxInteractionRangeSq) {
+					nearSomething = true;
+					break;
+				}
+			}
+		}
+
+		if (!nearSomething) {
+			// Far from everything: just apply drag and spring back
+			this.vx *= CONFIG.PARTICLE_DRAG;
+			this.vy *= CONFIG.PARTICLE_DRAG;
+			this.x += this.vx + (this.ox - this.x) * CONFIG.PARTICLE_EASE;
+			this.y += this.vy + (this.oy - this.y) * CONFIG.PARTICLE_EASE;
+			return;
+		}
+
+		// Anticipation: only calculate if cursor is moving fast enough
+		if (cursorSpeed > 1.5) {
+			const dynamicRadius = Math.sqrt(dynamicRadiusSq);
+			const awarenessRadiusSq = (this.awareness + dynamicRadius) ** 2;
+
+			if (distSq < awarenessRadiusSq && distSq > dynamicRadiusSq) {
+				const distSqrt = Math.sqrt(distSq);
+				const toParticleX = -dx / distSqrt;
+				const toParticleY = -dy / distSqrt;
 				const alignmentDot = cursorDirX * toParticleX + cursorDirY * toParticleY;
 
 				if (alignmentDot > 0.4) {
@@ -86,35 +96,47 @@ export class Particle {
 			}
 		}
 
+		// Main repulsion
 		if (distSq < dynamicRadiusSq) {
 			const safeDist = Math.max(distSq, 1);
 			const baseForce = (-dynamicRadiusSq / safeDist) * CONFIG.REPULSION_STRENGTH * buffForceMultiplier;
 			const force = baseForce * this.nervousness;
-			const angle = Math.atan2(dy, dx);
 
-			this.vx += force * Math.cos(angle);
-			this.vy += force * Math.sin(angle);
+			// Use normalized vector instead of angle + trig
+			const distSqrt = Math.sqrt(distSq);
+			const normX = dx / distSqrt;
+			const normY = dy / distSqrt;
 
-			const tangentialAngle = angle + Math.PI / 2;
-			const spiralForce = (force * spiralStrength * dist) / Math.sqrt(dynamicRadiusSq);
-			this.vx += spiralForce * Math.cos(tangentialAngle);
-			this.vy += spiralForce * Math.sin(tangentialAngle);
+			this.vx += force * normX;
+			this.vy += force * normY;
+
+			// Spiral: perpendicular to normalized direction
+			const dynamicRadius = Math.sqrt(dynamicRadiusSq);
+			const spiralForce = (force * spiralStrength * distSqrt) / dynamicRadius;
+			this.vx -= spiralForce * normY; // Perpendicular
+			this.vy += spiralForce * normX;
 		}
 
 		if (hasPulsatingBuff) {
 			const particleSpacing = isMobile ? CONFIG.SPACING_MOBILE : CONFIG.SPACING_DESKTOP;
 			const waveDistance = particleSpacing * 4;
 			const waveRadius = Math.sqrt(dynamicRadiusSq) + waveDistance;
+			const waveRadiusSq = waveRadius * waveRadius;
 			const waveThickness = particleSpacing * 6;
-			const distFromWaveCenter = Math.abs(dist - waveRadius);
 
-			if (distFromWaveCenter < waveThickness) {
-				const angle = Math.atan2(dy, dx);
+			// Use squared distance for initial check
+			const distFromWaveSq = Math.abs(distSq - waveRadiusSq);
+			const waveThicknessSq = waveThickness * waveThickness;
+
+			if (distFromWaveSq < waveThicknessSq) {
+				const distSqrt = Math.sqrt(distSq);
+				const normX = dx / distSqrt;
+				const normY = dy / distSqrt;
 				const normalizedPulse = (pulseStrength) * 2 - 1;
-				const proximityFactor = 1.0 - (distFromWaveCenter / waveThickness);
+				const proximityFactor = 1.0 - (Math.sqrt(distFromWaveSq) / waveThickness);
 				const waveForce = normalizedPulse * proximityFactor * 8.0;
-				this.vx += waveForce * Math.cos(angle);
-				this.vy += waveForce * Math.sin(angle);
+				this.vx += waveForce * normX;
+				this.vy += waveForce * normY;
 			}
 		}
 
@@ -122,9 +144,11 @@ export class Particle {
 			const odx = this.x - o.x;
 			const ody = this.y - o.y;
 			const oDistSq = odx * odx + ody * ody;
-			const morphPulse = Math.sin(o.frame * 0.05) * 0.05 + Math.sin(o.frame * 0.02 + this.angle * 2) * 0.04 + 1.0;
-			const angleToParticle = Math.atan2(ody, odx);
-			const tentacleVariation = Math.sin(angleToParticle * 3 + o.frame * 0.03) * 0.08 + Math.cos(angleToParticle * 5 - o.frame * 0.04) * 0.06;
+
+			// Simplified organic variation (removed one trig call)
+			const morphPulse = Math.sin(o.frame * 0.05) * 0.05 + 1.0;
+			const angleApprox = Math.atan2(ody, odx); // Only one atan2
+			const tentacleVariation = Math.sin(angleApprox * 3 + o.frame * 0.03) * 0.08;
 			const organicRadius = o.radius * morphPulse * (1.0 + tentacleVariation);
 			const currentRadiusSq = organicRadius ** 2;
 
@@ -135,9 +159,11 @@ export class Particle {
 					const oDist = Math.sqrt(oDistSq);
 					const edgePos = (oDist - (organicRadius - edgeThickness)) / edgeThickness;
 					const force = (1.0 - edgePos) * 2.0;
-					const angle = Math.atan2(ody, odx);
-					this.vx += force * Math.cos(angle);
-					this.vy += force * Math.sin(angle);
+					// Use normalized vector
+					const normX = odx / oDist;
+					const normY = ody / oDist;
+					this.vx += force * normX;
+					this.vy += force * normY;
 				}
 			} else {
 				const pullAge = o.frame - 360;
@@ -155,9 +181,11 @@ export class Particle {
 					pullStrength *= 1.0 + (1.0 - activeParticleRatio) * 0.8;
 					const distanceFactor = 1.0 - Math.min(oDist / pullRadius, 1.0);
 					const blackHoleForce = pullStrength * (1.0 + distanceFactor * 1.4);
-					const angle = Math.atan2(ody, odx);
-					this.vx -= blackHoleForce * Math.cos(angle);
-					this.vy -= blackHoleForce * Math.sin(angle);
+					// Use normalized vector
+					const normX = odx / oDist;
+					const normY = ody / oDist;
+					this.vx -= blackHoleForce * normX;
+					this.vy -= blackHoleForce * normY;
 				}
 			}
 		}
@@ -196,25 +224,31 @@ export class Particle {
 						const aDist = Math.sqrt(aDistSq);
 						const falloff = 1.0 - aDist / vortexRadius;
 						let vortexStrength = (a.vortexStrength || CONFIG.ANOMALY_VORTEX_STRENGTH) * falloff;
-		
+
 						if (a.vortexBoostEndTime && now < a.vortexBoostEndTime) {
 							vortexStrength *= 1.5;
 						}
-		
+
+						// Optimize synergy check: use squared distance to avoid sqrt
+						const synergyRangeSq = CONFIG.SYNERGY_RANGE * CONFIG.SYNERGY_RANGE;
 						for (const v of outbreaks) {
-							if (Math.sqrt((v.x - a.x) ** 2 + (v.y - a.y) ** 2) < CONFIG.SYNERGY_RANGE) {
+							const vdx = v.x - a.x;
+							const vdy = v.y - a.y;
+							if (vdx * vdx + vdy * vdy < synergyRangeSq) {
 								vortexStrength *= v.maxed ? CONFIG.SYNERGY_VORTEX_BOOST * 1.4 : CONFIG.SYNERGY_VORTEX_BOOST;
 								break;
 							}
 						}
-		
-						const angleToAnomaly = Math.atan2(ady, adx);
-						this.vx -= (vortexStrength * 0.3) * Math.cos(angleToAnomaly);
-						this.vy -= (vortexStrength * 0.3) * Math.sin(angleToAnomaly);
-		
-						const tangentialAngle = angleToAnomaly + Math.PI / 2;
-						this.vx += (vortexStrength * 1.2) * Math.cos(tangentialAngle);
-						this.vy += (vortexStrength * 1.2) * Math.sin(tangentialAngle);
+
+						// Use normalized vector instead of angle + trig
+						const normX = adx / aDist;
+						const normY = ady / aDist;
+						this.vx -= (vortexStrength * 0.3) * normX;
+						this.vy -= (vortexStrength * 0.3) * normY;
+
+						// Perpendicular (tangential) force
+						this.vx -= (vortexStrength * 1.2) * normY; // Perpendicular
+						this.vy += (vortexStrength * 1.2) * normX;
 					}
 				}
 		this.vx *= CONFIG.PARTICLE_DRAG;
