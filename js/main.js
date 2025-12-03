@@ -30,9 +30,11 @@ const state = {
     imageData: null, imageDataBuffer: null,
     debugPanel: null, screenSizeMultiplier: 1.0,
     frameCount: 0, fps: 0, lastFpsUpdate: 0,
+    resizeTimeout: null,
 };
 
-function updateCursor(deltaTime) {
+// Heavy cursor calculations (physics frames only)
+function updateCursorForces(deltaTime) {
 	const elapsed = Date.now() - state.startTime;
 	const speedProgress = Math.min(elapsed / CONFIG.CURSOR_SPEED_DURATION, 1);
     const { w, h, centerX, centerY, outbreaks, anomalies, cursorBuffs, isMobile, activeParticleRatio, isManual } = state;
@@ -146,9 +148,6 @@ function updateCursor(deltaTime) {
         }
     }
 
-	state.cursorX += state.cursorVx;
-	state.cursorY += state.cursorVy;
-
     let particleScaling = 1.0;
     if (activeParticleRatio < 0.4) particleScaling = 1.0 + (activeParticleRatio / 0.4) * (isMobile ? 0.25 : 0.3);
     else particleScaling = 1.0 + (isMobile ? 0.25 : 0.3) - ((activeParticleRatio - 0.4) / 0.6) * 0.65;
@@ -158,50 +157,78 @@ function updateCursor(deltaTime) {
     state.radiusMultiplier += (targetRadius - state.radiusMultiplier) * 0.1;
 }
 
+// Light cursor position update (every frame for smooth 60fps)
+function updateCursorPosition() {
+	// Scale velocity by inverse of screen size - bigger screens = slower cursor
+	const speedScale = Math.max(0.5, 1.0 / state.screenSizeMultiplier);
+	state.cursorX += state.cursorVx * speedScale;
+	state.cursorY += state.cursorVy * speedScale;
+}
+
 function draw() {
-    const { ctx, w, h, list } = state;
-	state.imageData = ctx.createImageData(w, h);
-	state.imageDataBuffer = new Uint32Array(state.imageData.data.buffer);
+    const { ctx, w, h, list, imageDataBuffer, imageData, outbreaks, stations } = state;
+	// Clear buffer to opaque black (0xFF000000 = alpha 255, RGB 0,0,0)
+	imageDataBuffer.fill(0xFF000000);
+
+	// Pre-compute outbreak visibility data (only mature outbreaks affect visibility)
+	const matureOutbreaks = [];
+	for (const o of outbreaks) {
+		if (o.frame < 360) continue;
+		const pullAge = o.frame - 360;
+		const initialProgress = Math.min(pullAge / 1200, 1.0);
+		const continuousGrowth = Math.min(pullAge / 3600, 1.5);
+		const pullRadius = o.radius * (CONFIG.OUTBREAK_PULL_RADIUS_MIN + (CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) * initialProgress + continuousGrowth * 1.5);
+		matureOutbreaks.push({ x: o.x, y: o.y, pullRadius, pullRadiusSq: pullRadius * pullRadius });
+	}
+
+	// Pre-compute station positions
+	const stationPositions = [];
+	for (const s of stations) {
+		if (s.isCapturing) continue;
+		const p1x = s.x + Math.cos(s.orbitAngle) * s.orbitRadius;
+		const p1y = s.y + Math.sin(s.orbitAngle) * s.orbitRadius;
+		const p2x = s.x - Math.cos(s.orbitAngle) * s.orbitRadius;
+		const p2y = s.y - Math.sin(s.orbitAngle) * s.orbitRadius;
+		stationPositions.push({ p1x, p1y, p2x, p2y });
+	}
 
 	for (let i = 0; i < list.length; i++) {
 		const p = list[i];
+		if (!p.active) continue;
+
         let color = CONFIG.COLOR;
         let visibility = 1.0;
 
-        for (const o of state.outbreaks) {
-            if (o.frame < 360) continue;
+        // Check visibility dimming from mature outbreaks
+        for (let j = 0; j < matureOutbreaks.length; j++) {
+			const o = matureOutbreaks[j];
             const dx = p.x - o.x;
             const dy = p.y - o.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const pullAge = o.frame - 360;
-            const initialProgress = Math.min(pullAge / 1200, 1.0);
-            const continuousGrowth = Math.min(pullAge / 3600, 1.5);
-            const pullRadius = o.radius * (CONFIG.OUTBREAK_PULL_RADIUS_MIN + (CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) * initialProgress + continuousGrowth * 1.5);
-            if (dist < pullRadius) {
-                const fadeProgress = 1.0 - dist / pullRadius;
+			const distSq = dx * dx + dy * dy;
+            if (distSq < o.pullRadiusSq) {
+				const dist = Math.sqrt(distSq);
+                const fadeProgress = 1.0 - dist / o.pullRadius;
                 let dimming = (fadeProgress < 0.6) ? 0.2 + (fadeProgress / 0.6) * 0.3 : 0.5 - ((fadeProgress - 0.6) / 0.4) * 0.3;
                 visibility = Math.min(visibility, 1.0 - dimming);
             }
         }
         color *= visibility;
 
-        for (const s of state.stations) {
-            if (s.isCapturing) continue;
-            const p1x = s.x + Math.cos(s.orbitAngle) * s.orbitRadius;
-            const p1y = s.y + Math.sin(s.orbitAngle) * s.orbitRadius;
-            const p2x = s.x - Math.cos(s.orbitAngle) * s.orbitRadius;
-            const p2y = s.y - Math.sin(s.orbitAngle) * s.orbitRadius;
-            if (((p.x - p1x)**2 + (p.y - p1y)**2 < 12*12) || ((p.x - p2x)**2 + (p.y - p2y)**2 < 12*12)) {
+        // Check if particle is part of a station
+		for (let j = 0; j < stationPositions.length; j++) {
+			const s = stationPositions[j];
+            if (((p.x - s.p1x)**2 + (p.y - s.p1y)**2 < 144) || ((p.x - s.p2x)**2 + (p.y - s.p2y)**2 < 144)) {
                 color = 255;
+				break;
             }
         }
 
-		if (p.active && p.x > 0 && p.x < w && p.y > 0 && p.y < h) {
+		if (p.x > 0 && p.x < w && p.y > 0 && p.y < h) {
 			const index = (Math.floor(p.y) * w + Math.floor(p.x));
-			state.imageDataBuffer[index] = (255 << 24) | (color << 16) | (color << 8) | color;
+			imageDataBuffer[index] = (255 << 24) | (color << 16) | (color << 8) | color;
 		}
 	}
-	ctx.putImageData(state.imageData, 0, 0);
+	ctx.putImageData(imageData, 0, 0);
 }
 
 function updateGrowth() {
@@ -217,9 +244,12 @@ function updateGrowth() {
     }
     const baseThreshold = state.maxParticleDistance * radiusProgress;
     const time = elapsed * 0.001;
+    const timeA = time * 0.5;
+    const timeB = time * 0.8;
     let activeCount = 0;
-    for (const p of state.list) {
-        const directionalGrowth = Math.sin(p.angle * 3 + time * 0.5) * 0.15 + Math.sin(p.angle * 5 - time * 0.8) * 0.1;
+    for (let i = 0; i < state.list.length; i++) {
+        const p = state.list[i];
+        const directionalGrowth = Math.sin(p.angle * 3 + timeA) * 0.15 + Math.sin(p.angle * 5 - timeB) * 0.1;
         const threshold = baseThreshold * (1 + directionalGrowth + p.growthOffset);
         p.active = p.distFromCenter <= threshold;
         if (p.active) activeCount++;
@@ -236,6 +266,7 @@ function loop() {
 	if (state.frameToggle) {
 		const elapsed = now - state.startTime;
 		state.spiralStrength = CONFIG.SPIRAL_STRENGTH_BASE + elapsed * CONFIG.SPIRAL_TIGHTENING_RATE;
+		updateCursorForces(deltaTime);
 		updateGrowth();
 		updateOutbreaks(state);
 		updateAnomalies(state);
@@ -246,7 +277,8 @@ function loop() {
 	} else {
 		draw();
 	}
-    updateCursor(deltaTime);
+	// Update cursor position every frame for smooth 60fps movement
+	updateCursorPosition();
 	if (state.debugPanel) updateDebugPanel();
 	requestAnimationFrame(loop);
 }
@@ -254,11 +286,19 @@ function loop() {
 function init() {
     state.isMobile = window.innerWidth <= 768 || window.matchMedia("(orientation: portrait)").matches;
     const containerId = state.isMobile ? "container-mobile" : "container";
-    state.container = document.getElementById(containerId);
-    if (!state.container) return;
+    const newContainer = document.getElementById(containerId);
+    if (!newContainer) return;
 
-    state.canvas = document.createElement("canvas");
-    state.ctx = state.canvas.getContext("2d", { alpha: false });
+    // Remove canvas from old container if switching between mobile/desktop
+    if (state.container && state.container !== newContainer && state.canvas) {
+        state.container.removeChild(state.canvas);
+    }
+    state.container = newContainer;
+
+    if (!state.canvas) {
+        state.canvas = document.createElement("canvas");
+        state.ctx = state.canvas.getContext("2d", { alpha: false });
+    }
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     state.w = state.canvas.width = vw;
@@ -295,17 +335,29 @@ function init() {
     state.nextStationTime = state.startTime + CONFIG.STATION_SPAWN_MIN;
     state.nextDisruptionTime = state.startTime + 45000;
 
-    if (state.container.firstChild) state.container.removeChild(state.container.firstChild);
-    state.container.appendChild(state.canvas);
+    // Append canvas if not already in container
+    if (!state.container.contains(state.canvas)) {
+        state.container.appendChild(state.canvas);
+    }
+
+    // Pre-allocate imageData buffer once
+    state.imageData = state.ctx.createImageData(state.w, state.h);
+    state.imageDataBuffer = new Uint32Array(state.imageData.data.buffer);
+
     if (!state.debugPanel) state.debugPanel = new DebugPanel();
     if (state.list.length > 0) loop();
 }
 
 function setupEventListeners() {
     const handleInput = (clientX, clientY) => {
+        // Convert viewport coordinates to canvas coordinates
+        const rect = state.canvas.getBoundingClientRect();
+        const canvasX = clientX - rect.left;
+        const canvasY = clientY - rect.top;
+
         clearTimeout(state.manualTimeout);
-        state.targetX = clientX;
-        state.targetY = clientY;
+        state.targetX = canvasX;
+        state.targetY = canvasY;
         if (!state.isManual) state.transitionBlend = 0;
         state.isManual = true;
         state.manualTimeout = setTimeout(() => {
@@ -316,7 +368,7 @@ function setupEventListeners() {
     document.addEventListener("mousemove", e => handleInput(e.clientX, e.clientY));
     document.addEventListener("touchstart", e => { if (e.touches.length === 1) handleInput(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
     document.addEventListener("touchmove", e => { if (e.touches.length === 1) { e.preventDefault(); handleInput(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
-    window.addEventListener("resize", () => { clearTimeout(onResize.timeout); onResize.timeout = setTimeout(init, 200); });
+    window.addEventListener("resize", () => { clearTimeout(state.resizeTimeout); state.resizeTimeout = setTimeout(init, 200); });
 }
 
 function updateDebugPanel() {

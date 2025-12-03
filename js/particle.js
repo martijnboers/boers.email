@@ -69,7 +69,7 @@ export class Particle {
 		const dynamicRadiusSq = CONFIG.REPULSION_RADIUS ** 2 * radiusMultiplier ** 2 * buffRadiusMultiplier ** 2;
 
 		const awarenessRadiusSq = (this.awareness + Math.sqrt(dynamicRadiusSq)) ** 2;
-		if (distSq < awarenessRadiusSq && dist > Math.sqrt(dynamicRadiusSq)) {
+		if (distSq < awarenessRadiusSq && distSq > dynamicRadiusSq) {
 			const cursorSpeed = Math.sqrt(cursorVx * cursorVx + cursorVy * cursorVy);
 			if (cursorSpeed > 1.5) {
 				const cursorDirX = cursorVx / cursorSpeed;
@@ -122,7 +122,6 @@ export class Particle {
 			const odx = this.x - o.x;
 			const ody = this.y - o.y;
 			const oDistSq = odx * odx + ody * ody;
-			const oDist = Math.sqrt(oDistSq);
 			const morphPulse = Math.sin(o.frame * 0.05) * 0.05 + Math.sin(o.frame * 0.02 + this.angle * 2) * 0.04 + 1.0;
 			const angleToParticle = Math.atan2(ody, odx);
 			const tentacleVariation = Math.sin(angleToParticle * 3 + o.frame * 0.03) * 0.08 + Math.cos(angleToParticle * 5 - o.frame * 0.04) * 0.06;
@@ -133,6 +132,7 @@ export class Particle {
 				const edgeThickness = 18;
 				const innerRadiusSq = Math.max(0, organicRadius - edgeThickness) ** 2;
 				if (oDistSq < currentRadiusSq && oDistSq > innerRadiusSq) {
+					const oDist = Math.sqrt(oDistSq);
 					const edgePos = (oDist - (organicRadius - edgeThickness)) / edgeThickness;
 					const force = (1.0 - edgePos) * 2.0;
 					const angle = Math.atan2(ody, odx);
@@ -146,8 +146,10 @@ export class Particle {
 				const baseMultiplier = CONFIG.OUTBREAK_PULL_RADIUS_MIN + (CONFIG.OUTBREAK_PULL_RADIUS_MAX - CONFIG.OUTBREAK_PULL_RADIUS_MIN) * initialProgress;
 				const pullRadiusMultiplier = baseMultiplier + continuousGrowth * 1.67;
 				const pullRadius = organicRadius * pullRadiusMultiplier;
+				const pullRadiusSq = pullRadius ** 2;
 
-				if (oDistSq < pullRadius ** 2) {
+				if (oDistSq < pullRadiusSq) {
+					const oDist = Math.sqrt(oDistSq);
 					let pullStrength = Math.min(pullAge / 1200, 1.0) * 1.2;
 					pullStrength *= 1.0 + continuousGrowth * 0.3;
 					pullStrength *= 1.0 + (1.0 - activeParticleRatio) * 0.8;
@@ -172,10 +174,11 @@ export class Particle {
             } else {
                 const dx = this.x - s.x;
                 const dy = this.y - s.y;
-                const distSq = dx * dx + dy * dy;
+                const stationDistSq = dx * dx + dy * dy;
                 const radius = 25 + Math.sin(this.angle * 5) * 5; // Irregular shape
+                const radiusSq = radius * radius;
 
-                if (distSq < radius * radius) {
+                if (stationDistSq < radiusSq) {
                     this.vx += (s.x - this.x) * 0.1;
                     this.vy += (s.y - this.y) * 0.1;
                 }
@@ -185,10 +188,12 @@ export class Particle {
 		        for (const a of anomalies) {
 					const adx = this.x - a.x;
 					const ady = this.y - a.y;
-					const aDist = Math.sqrt(adx * adx + ady * ady);
+					const aDistSq = adx * adx + ady * ady;
 					const vortexRadius = a.vortexRadius || CONFIG.ANOMALY_VORTEX_RADIUS;
-		
-					if (aDist < vortexRadius) {
+					const vortexRadiusSq = vortexRadius * vortexRadius;
+
+					if (aDistSq < vortexRadiusSq) {
+						const aDist = Math.sqrt(aDistSq);
 						const falloff = 1.0 - aDist / vortexRadius;
 						let vortexStrength = (a.vortexStrength || CONFIG.ANOMALY_VORTEX_STRENGTH) * falloff;
 		
