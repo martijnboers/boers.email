@@ -301,7 +301,10 @@ function updateGrowth() {
         radiusProgress = CONFIG.GROWTH_START_RADIUS + easedProgress * (0.68 - CONFIG.GROWTH_START_RADIUS);
     } else {
         const wave = Math.sin((elapsed - CONFIG.GROWTH_DURATION * 0.6) * 0.0003) * 0.5 + 0.5;
-        radiusProgress = 0.55 + wave * 0.15;
+        // Desktop: limit max size, Mobile: full size
+        const maxSize = state.isMobile ? 0.70 : 0.55;
+        const waveAmount = state.isMobile ? 0.15 : 0.10;
+        radiusProgress = (maxSize - waveAmount) + wave * waveAmount;
     }
     const baseThreshold = state.maxParticleDistance * radiusProgress;
     const time = elapsed * 0.001;
