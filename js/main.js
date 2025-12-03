@@ -307,15 +307,31 @@ function updateGrowth() {
     const time = elapsed * 0.001;
     const timeA = time * 0.5;
     const timeB = time * 0.8;
+
+    // Manual cursor trailing effect
+    const cursorDx = state.cursorX - state.centerX;
+    const cursorDy = state.cursorY - state.centerY;
+    const cursorAngle = Math.atan2(cursorDy, cursorDx);
+
     let activeCount = 0;
     for (let i = 0; i < state.list.length; i++) {
         const p = state.list[i];
         // Very subtle directional growth with more noise to avoid stripes
         const directionalGrowth = Math.sin(p.angle * 3 + timeA) * 0.04 + Math.sin(p.angle * 7 - timeB) * 0.03;
-        // Add perlin-like noise to break up patterns
         const noiseA = Math.sin(p.angle * 11 + time * 0.3) * 0.03;
         const noiseB = Math.cos(p.angle * 13 - time * 0.4) * 0.02;
-        const threshold = baseThreshold * (1 + directionalGrowth + noiseA + noiseB + p.growthOffset);
+
+        // Cursor trailing: particles behind cursor direction activate more easily
+        let trailingBonus = 0;
+        if (state.isManual) {
+            const angleDiff = Math.abs(p.angle - cursorAngle);
+            const normalizedAngle = Math.min(angleDiff, Math.PI * 2 - angleDiff);
+            if (normalizedAngle > Math.PI * 0.5) { // Particles behind cursor
+                trailingBonus = (normalizedAngle - Math.PI * 0.5) / (Math.PI * 0.5) * 0.15;
+            }
+        }
+
+        const threshold = baseThreshold * (1 + directionalGrowth + noiseA + noiseB + trailingBonus + p.growthOffset);
         const shouldBeActive = p.distFromCenter <= threshold;
 
         // Gradual activation: don't instantly flip state
