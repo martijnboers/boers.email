@@ -685,6 +685,12 @@ window.debugSpawnStation = () => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Set current year
+    const yearSpan = document.getElementById('year');
+    if (yearSpan) {
+        yearSpan.textContent = new Date().getFullYear();
+    }
+
     init();
     setupEventListeners();
 });
