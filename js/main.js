@@ -34,6 +34,7 @@ const state = {
     lastPhysicsTime: 0,
     debugParticleVisibility: 0, // 0 = auto, 1-100 = force percentage
     renderCursorX: 0, renderCursorY: 0, // Smooth 60fps cursor position
+    lastWidth: 0, lastHeight: 0, // Track real resizes
 };
 
 // Heavy cursor calculations (physics frames only)
@@ -491,6 +492,10 @@ function init() {
     state.imageData = state.ctx.createImageData(state.w, state.h);
     state.imageDataBuffer = new Uint32Array(state.imageData.data.buffer);
 
+    // Track dimensions for resize detection
+    state.lastWidth = vw;
+    state.lastHeight = vh;
+
     if (!state.debugPanel) state.debugPanel = new DebugPanel();
     if (state.list.length > 0) loop();
 }
@@ -552,7 +557,22 @@ function setupEventListeners() {
             handleInput(e.touches[0].clientX, e.touches[0].clientY);
         }
     }, { passive: false });
-    window.addEventListener("resize", () => { clearTimeout(state.resizeTimeout); state.resizeTimeout = setTimeout(init, 200); });
+    window.addEventListener("resize", () => {
+        clearTimeout(state.resizeTimeout);
+        state.resizeTimeout = setTimeout(() => {
+            const newWidth = window.innerWidth;
+            const newHeight = window.innerHeight;
+
+            // Only reinitialize if change is significant (more than 100px in either dimension)
+            // This avoids reinitialization from mobile browser toolbars appearing/disappearing
+            const widthChange = Math.abs(newWidth - state.lastWidth);
+            const heightChange = Math.abs(newHeight - state.lastHeight);
+
+            if (widthChange > 100 || heightChange > 100) {
+                init();
+            }
+        }, 300);
+    });
 }
 
 // Debug function to set particle visibility percentage
