@@ -31,7 +31,7 @@ class DebugPanel {
 		// Desktop: fixed to viewport (right corner), Mobile: absolute in content box (left corner)
 		if (isMobile) {
 			this.iconElement.style.position = 'absolute';
-			this.iconElement.style.bottom = '20px';
+			this.iconElement.style.bottom = '70px';
 			this.iconElement.style.left = '20px';
 		} else {
 			this.iconElement.style.position = 'fixed';

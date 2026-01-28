@@ -145,6 +145,20 @@ li strong {
     opacity: 0.9;
 }
 
+li strong.subtle {
+    font-size: 12px;
+    opacity: 0.6;
+}
+
+li span.subtle {
+    font-size: 12px;
+    opacity: 0.6;
+}
+
+li span.subtle .ring-icon {
+    font-size: 16px;
+}
+
 li span {
     text-align: right;
 }
@@ -240,6 +254,13 @@ li.divider-top {
 
     li.divider-top {
         display: none;
+    }
+
+    li.divider-top.subtle {
+        display: flex;
+        border-top: 1px solid hsla(0, 0%, 100%, .15);
+        padding-top: 14px;
+        margin-top: 8px;
     }
 
     ul.visual-section {
